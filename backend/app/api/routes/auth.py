@@ -1,7 +1,7 @@
 import os
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.services import auth_service
 from app.db.session import get_db
@@ -10,7 +10,6 @@ router = APIRouter()
 
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "frontend", "templates")
-DB_PATH = os.path.join(BASE_DIR, "vulnerable_app.db")
 
 
 @router.get("/")
@@ -48,12 +47,6 @@ async def login_post(
     password: str = Form(""),
 ):
     return auth_service.login(request, username, password)
-
-
-@router.get("/download/db")
-async def download_db():
-    # VULNERABILITY #6: Exposed Database -- no authentication check
-    return FileResponse(path=DB_PATH, filename="vulnerable_app.db")
 
 
 @router.get("/search")
