@@ -27,7 +27,7 @@ backend/app/
 ├── main.py              # Entry point, middleware, static mounts
 ├── core/security.py     # bcrypt password hashing (cost 12) — VULN-5 closed
 ├── db/session.py        # SQLite connection and init
-├── services/auth_service.py  # Auth business logic (SQL injection still here)
+├── services/auth_service.py  # Auth business logic - VULN-1 closed
 └── api/routes/auth.py   # HTTP route handlers
 
 frontend/
@@ -41,7 +41,7 @@ frontend/
 
 | # | Vulnerability | File | Mechanism | Status |
 |---|---------------|------|-----------|--------|
-| 1 | SQL Injection | `backend/app/services/auth_service.py` | String concatenation in SQL queries (both `signup()` INSERT and `login()` SELECT WHERE-username branch) | Open |
+| 1 | SQL Injection | `backend/app/services/auth_service.py` | String concatenation in SQL queries (both `signup()` INSERT and `login()` SELECT WHERE-username branch) | **Closed** |
 | 2 | Stored XSS | `backend/app/api/routes/auth.py` | Unescaped `{{username}}` in dashboard | Open |
 | 3 | Reflected XSS | `backend/app/api/routes/auth.py` | Unescaped query param in search | Open |
 | 4 | Session Hijacking | `backend/app/main.py` | Hardcoded secret `"super-secret-key-12345"` | Open |
@@ -54,7 +54,7 @@ frontend/
 
 `auth_service.login()` no longer matches the password hash inside SQL (bcrypt's per-call salt makes equality matching impossible). It now:
 
-1. Builds `SELECT * FROM users WHERE username = '" + username + "'` — username branch is **still string-concatenated** so VULN-1 is preserved.
+1. Builds `SELECT * FROM users WHERE username = '" + username + "'` — username branch is **still string-concatenated**, preventing SQL injection.
 2. Calls `verify_password(password, row["password"])` in Python after `fetchone()`.
 3. Returns the same JSON 401 for "no row," "bcrypt mismatch," and "legacy MD5 row" cases — no information leakage between them.
 
@@ -69,7 +69,7 @@ If a legacy MD5 hex digest exists in `vulnerable_app.db`, it cannot authenticate
 
 ## Important Rules
 
-- Never use parameterized queries in `auth_service.py` or `auth.py` (preserves VULN-1). In particular, the `WHERE username = '<...>'` concatenation in `login()` MUST stay even though the password match moved to Python.
+- Always use parameterized queries in `auth_service.py` and `auth.py`. Never concatenate user-controlled input into SQL statements.` MUST stay even though the password match moved to Python.
 - Never add CSRF tokens to forms (preserves VULN-8)
 - Never change the session secret key (preserves VULN-4)
 - Never add rate limiting middleware (preserves VULN-7)

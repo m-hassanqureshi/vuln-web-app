@@ -141,7 +141,7 @@ The app starts at **http://localhost:3001**. The database file (`vulnerable_app.
 
 | # | Vulnerability | OWASP Category | Location | Status |
 |---|---------------|----------------|----------|--------|
-| 1 | SQL Injection | A03:2021 - Injection | `auth_service.py` — string concatenation in queries | Open |
+| 1 | SQL Injection | A03:2021 - Injection | `auth_service.py` — string concatenation in queries | **Closed** |
 | 2 | Stored XSS | A03:2021 - Injection | `auth.py` — unescaped username on dashboard | Open |
 | 3 | Reflected XSS | A03:2021 - Injection | `auth.py` — unescaped query param in search | Open |
 | 4 | Session Hijacking | A07:2021 - Auth Failures | `main.py` — hardcoded secret key | Open |
@@ -187,13 +187,12 @@ Stop-Process -Id <PID> -Force
 ---
 
 ## Bug Fixes
-
-The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **already fixed** as of **v0.1.1**. The remaining **seven** vulnerabilities below are **still open** and are the ones you should patch.
+The **weak password storage** bug (VULN-5: MD5 → bcrypt) and **SQL injection** vulnerability (VULN-1: string concatenation → parameterized queries) are **already fixed** as of **v0.1.1**. The remaining **six** vulnerabilities below are **still open** and are the ones you should patch.
 
 | # | Vulnerability | Description | Status |
 |---|---------------|-------------|--------|
 | 1 | Weak Password Storage | Passwords were hashed with unsalted MD5; replaced with bcrypt (cost 12). Login now verifies the hash in Python instead of matching it in the SQL query. | **Fixed (v0.1.1)** |
-| 2 | SQL Injection | `auth_service.py` builds queries with raw string concatenation; crafted input can read data or bypass authentication. Fix with parameterized/prepared queries. | Open |
+| 2 | SQL Injection | `auth_service.py` builds queries with raw string concatenation; crafted input can read data or bypass authentication. Fix with parameterized/prepared queries. | **Fixed** |
 | 3 | Stored XSS | `auth.py` renders the username on the dashboard without escaping, so a malicious script persists in the database and executes for every viewer. Fix with output escaping/template auto-escape. | Open |
 | 4 | Reflected XSS | The `/search` endpoint echoes the `q` parameter back unescaped, executing injected scripts in the victim's browser. Fix by escaping reflected output. | Open |
 | 5 | Session Hijacking | `main.py` uses a hardcoded session secret key, making session cookies guessable/forgeable. Fix by loading a strong, random secret from the environment. | Open |

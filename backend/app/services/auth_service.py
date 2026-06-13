@@ -16,12 +16,12 @@ def signup(username: str, email: str, password: str):
 
     hashed = hash_password(password)
 
-    # VULNERABILITY #1: SQL Injection via string concatenation
-    query = "INSERT INTO users (username, email, password) VALUES ('" + username + "', '" + email + "', '" + hashed + "')"
+    # FIXED: SQL Injection closed by using parameterized query
+    query = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
 
     conn = get_db()
     try:
-        conn.execute(query)
+        conn.execute(query, [username, email, hashed])
         conn.commit()
         return RedirectResponse(url="/login", status_code=302)
     except sqlite3.IntegrityError:
@@ -45,15 +45,14 @@ def login(request: Request, username: str, password: str):
             status_code=401,
         )
 
-    # VULNERABILITY #1: SQL Injection via string concatenation
-    # (Password comparison is performed in Python — see verify_password below —
-    # because bcrypt hashes cannot be matched with an SQL equality check.
-    # The username branch is intentionally still concatenated to preserve VULN-1.)
-    query = "SELECT * FROM users WHERE username = '" + username + "'"
+    # FIXED: SQL Injection closed by using parameterized query
+    # (Password comparison is performed in Python via verify_password
+    # because bcrypt hashes cannot be matched with an SQL equality check.)
+    query = "SELECT * FROM users WHERE username = ?"
 
     conn = get_db()
     try:
-        cursor = conn.execute(query)
+        cursor = conn.execute(query, [username])
         user = cursor.fetchone()
     except Exception:
         return JSONResponse(

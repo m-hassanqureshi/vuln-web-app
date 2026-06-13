@@ -61,13 +61,13 @@ async def search_user(q: str = ""):
     if not q:
         return HTMLResponse(content="<h3>No search query provided</h3>")
 
-    # VULNERABILITY #3: Reflected XSS -- query interpolated into HTML without escaping
-    # SQL also uses string concatenation
-    query = "SELECT username, email FROM users WHERE username LIKE '%" + q + "%' OR email LIKE '%" + q + "%'"
+    # FIXED: SQL Injection closed by using parameterized query
+    # VULNERABILITY #3: Reflected XSS still preserved -- query interpolated into HTML without escaping
+    query = "SELECT username, email FROM users WHERE username LIKE ? OR email LIKE ?"
 
     conn = get_db()
     try:
-        cursor = conn.execute(query)
+        cursor = conn.execute(query, [f"%{q}%", f"%{q}%"])
         rows = cursor.fetchall()
 
         results = ""
