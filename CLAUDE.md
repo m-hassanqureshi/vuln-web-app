@@ -2,9 +2,9 @@
 
 ## Project Context
 
-This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. Six of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), VULN-2 (Stored XSS), and VULN-3 (Reflected XSS) — have since been closed. The other 2 remain intentionally exploitable for students to attack, understand, and remediate.
+This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. Seven of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), VULN-2 (Stored XSS), VULN-3 (Reflected XSS), and VULN-7 (No Rate Limiting) — have since been closed. The other 1 remains intentionally exploitable for students to attack, understand, and remediate.
 
-**WARNING:** The remaining 2 vulnerabilities are intentional. Do not "fix" them unless explicitly asked. The closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, the escaped dashboard username, and the escaped search output) are permanent — do not revert them.
+**WARNING:** The remaining 1 vulnerability is intentional. Do not "fix" it unless explicitly asked. The closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, the escaped dashboard username, the escaped search output, and the per-IP POST rate-limit middleware) are permanent — do not revert them.
 
 ## Development Commands
 
@@ -47,7 +47,7 @@ frontend/
 | 4 | Session Hijacking | `backend/app/main.py` | Was hardcoded secret `"super-secret-key-12345"`; now sourced from the `SECRET_KEY` env var with a strong `secrets.token_hex(32)` random fallback | **Closed** |
 | 5 | Weak Password | `backend/app/core/security.py` | Was MD5 (no salt); now bcrypt (`BCRYPT_ROUNDS = 12`); `verify_password` wraps `bcrypt.checkpw` in `try/except` so legacy MD5 rows return `False` instead of crashing | **Closed** |
 | 6 | Exposed DB | `backend/app/api/routes/auth.py` | Was an unauthenticated `/download/db` route; the route has been removed entirely | **Closed** |
-| 7 | No Rate Limit | Global | No rate limiting middleware | Open |
+| 7 | No Rate Limit | `backend/app/core/rate_limit.py` + `backend/app/main.py` | Stdlib `RateLimitMiddleware` enforces a per-IP sliding window on every POST (default 5 / 60 s); throttled requests get HTTP 429 + `Retry-After` before the handler runs | **Closed** |
 | 8 | CSRF | Global | No CSRF tokens | Open |
 
 ### Login Flow After the Bcrypt Fix
@@ -73,6 +73,26 @@ SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
 A fresh checkout that is simply run never falls back to a known or guessable key, so the cookie can no longer be forged from a published constant.
 
+### Rate Limiting After the Fix
+
+`main.py` registers a stdlib-only `RateLimitMiddleware` (defined in `backend/app/core/rate_limit.py`) after `SessionMiddleware`:
+
+```python
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "5"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=RATE_LIMIT_MAX,
+    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+)
+```
+
+- **Scope:** every `POST` request, identified by `request.client.host`. GET / HEAD / OPTIONS / static-file requests bypass the limiter with a single method-check.
+- **State:** in-process `dict[str, collections.deque[float]]` of `time.monotonic()` timestamps, guarded by a single `asyncio.Lock`. Reset on every restart — no Redis, no disk persistence.
+- **Throttled response:** HTTP `429` with body `{"error": "Too many requests", "retry_after": <int>}` and a `Retry-After: <int>` header. The downstream handler — including the bcrypt verify on `POST /login` — is never invoked on a throttled call.
+- **No proxy-header trust:** `X-Forwarded-For` is intentionally ignored. If you front the app with a reverse proxy in a real deployment, configure the proxy to populate `request.client.host` (e.g., uvicorn's `--proxy-headers` with a trusted-IP allowlist) rather than trusting headers blindly.
+- **Local lab use:** run with no env overrides — the defaults are conservative enough to make brute-force impractical without locking out a user who mistypes their password a few times. To experiment, set `RATE_LIMIT_MAX=2 RATE_LIMIT_WINDOW_SECONDS=5` before launch.
+
 ## Frontend-Backend Integration
 
 - **Login**: `fetch()` POST → JSON response → client-side redirect
@@ -85,7 +105,7 @@ A fresh checkout that is simply run never falls back to a known or guessable key
 - Always use parameterized queries in `auth_service.py` and `auth.py`. Never concatenate user-controlled input into SQL statements (VULN-1 is closed and must stay closed).
 - Never add CSRF tokens to forms (preserves VULN-8)
 - Never re-introduce a hardcoded session secret in `main.py`. VULN-4 is closed by sourcing `SECRET_KEY` from the environment with a strong `secrets.token_hex(32)` random fallback; the env-sourced secret is permanent and must stay (no constant key, no committed `.env`).
-- Never add rate limiting middleware (preserves VULN-7)
+- Never remove the rate-limit middleware in `backend/app/main.py` / `backend/app/core/rate_limit.py`. VULN-7 is closed by an in-process per-IP sliding-window `RateLimitMiddleware` scoped to every POST (default 5 requests per 60 s, tunable via `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_SECONDS` env vars). The middleware is permanent and must stay (stdlib-only, no third-party rate-limit dependency).
 - Never re-introduce MD5 or an "MD5 fallback" in `security.py`. Bcrypt is permanent; legacy MD5 rows must fail closed, not authenticate.
 - Never re-introduce unescaped `{{username}}` in the dashboard substitution. VULN-2 is closed by HTML-escaping the username with `html.escape(..., quote=True)` before substitution; the escaping is permanent and must stay (output encoding, not input filtering — the raw value still lives in the session/DB).
 - Never re-introduce unescaped reflection in `/search`. VULN-3 is closed by HTML-escaping every attacker-controllable sink (`q`, the result-row `username`/`email`, and the exception text) with `html.escape(..., quote=True)` before splicing; the escaping is permanent and must stay (output encoding, not input filtering — the raw values still live in the URL/DB).
@@ -103,5 +123,6 @@ A fresh checkout that is simply run never falls back to a known or guessable key
 7. `.claude/specs/session-hijacking-fix.md` + `.claude/specs/session-hijacking-fix-plan.md` — VULN-4 fix
 8. `.claude/specs/stored-xss-fix.md` + `.claude/specs/stored-xss-fix-plan.md` — VULN-2 fix
 9. `.claude/specs/reflected-xss-fix.md` + `.claude/specs/reflected-xss-fix-plan.md` — VULN-3 fix
+10. `.claude/specs/no-rate-limiting-fix.md` + `.claude/specs/no-rate-limiting-fix-plan.md` — VULN-7 fix
 
 Prompts that generated each spec/plan/implementation live under `docs/prompts/`.
