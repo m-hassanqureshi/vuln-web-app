@@ -2,9 +2,9 @@
 
 ## Project Context
 
-This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. Five of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), and VULN-2 (Stored XSS) — have since been closed. The other 3 remain intentionally exploitable for students to attack, understand, and remediate.
+This is an **intentionally vulnerable web application** for security education. It originally shipped with 8 OWASP Top 10 vulnerabilities. Six of them — VULN-5 (Weak Password Storage), VULN-1 (SQL Injection), VULN-6 (Exposed DB), VULN-4 (Session Hijacking), VULN-2 (Stored XSS), and VULN-3 (Reflected XSS) — have since been closed. The other 2 remain intentionally exploitable for students to attack, understand, and remediate.
 
-**WARNING:** The remaining 3 vulnerabilities are intentional. Do not "fix" them unless explicitly asked. The closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, and the escaped dashboard username) are permanent — do not revert them.
+**WARNING:** The remaining 2 vulnerabilities are intentional. Do not "fix" them unless explicitly asked. The closed fixes (bcrypt password hashing, parameterized SQL, removed `/download/db` route, the hardened session secret, the escaped dashboard username, and the escaped search output) are permanent — do not revert them.
 
 ## Development Commands
 
@@ -43,7 +43,7 @@ frontend/
 |---|---------------|------|-----------|--------|
 | 1 | SQL Injection | `backend/app/services/auth_service.py` | String concatenation in SQL queries (both `signup()` INSERT and `login()` SELECT WHERE-username branch) | **Closed** |
 | 2 | Stored XSS | `backend/app/api/routes/auth.py` | Was unescaped `{{username}}` in dashboard; now `html.escape(username, quote=True)` before substitution (output encoding; raw value still stored) | **Closed** |
-| 3 | Reflected XSS | `backend/app/api/routes/auth.py` | Unescaped query param in search | Open |
+| 3 | Reflected XSS | `backend/app/api/routes/auth.py` | Was unescaped `q` (and result rows / error text) in `/search`; now `html.escape(..., quote=True)` on every sink before splicing (output encoding; raw values still in URL/DB) | **Closed** |
 | 4 | Session Hijacking | `backend/app/main.py` | Was hardcoded secret `"super-secret-key-12345"`; now sourced from the `SECRET_KEY` env var with a strong `secrets.token_hex(32)` random fallback | **Closed** |
 | 5 | Weak Password | `backend/app/core/security.py` | Was MD5 (no salt); now bcrypt (`BCRYPT_ROUNDS = 12`); `verify_password` wraps `bcrypt.checkpw` in `try/except` so legacy MD5 rows return `False` instead of crashing | **Closed** |
 | 6 | Exposed DB | `backend/app/api/routes/auth.py` | Was an unauthenticated `/download/db` route; the route has been removed entirely | **Closed** |
@@ -88,7 +88,7 @@ A fresh checkout that is simply run never falls back to a known or guessable key
 - Never add rate limiting middleware (preserves VULN-7)
 - Never re-introduce MD5 or an "MD5 fallback" in `security.py`. Bcrypt is permanent; legacy MD5 rows must fail closed, not authenticate.
 - Never re-introduce unescaped `{{username}}` in the dashboard substitution. VULN-2 is closed by HTML-escaping the username with `html.escape(..., quote=True)` before substitution; the escaping is permanent and must stay (output encoding, not input filtering — the raw value still lives in the session/DB).
-- Never escape `q` in `/search` (preserves VULN-3, Reflected XSS)
+- Never re-introduce unescaped reflection in `/search`. VULN-3 is closed by HTML-escaping every attacker-controllable sink (`q`, the result-row `username`/`email`, and the exception text) with `html.escape(..., quote=True)` before splicing; the escaping is permanent and must stay (output encoding, not input filtering — the raw values still live in the URL/DB).
 - Never re-add the `/download/db` route. VULN-6 is closed by removing the endpoint entirely; do not reintroduce it (authenticated or otherwise).
 - The dark-mode feature is purely frontend (CSS + 4 files: `styles.css`, `login.html`, `signup.html`, `dashboard.html`). Don't push theme state into the backend, the session, or the database.
 
@@ -102,5 +102,6 @@ A fresh checkout that is simply run never falls back to a known or guessable key
 6. `.claude/specs/bcrypt-password-hashing.md` + `.claude/specs/bcrypt-password-hashing-plan.md` — VULN-5 fix
 7. `.claude/specs/session-hijacking-fix.md` + `.claude/specs/session-hijacking-fix-plan.md` — VULN-4 fix
 8. `.claude/specs/stored-xss-fix.md` + `.claude/specs/stored-xss-fix-plan.md` — VULN-2 fix
+9. `.claude/specs/reflected-xss-fix.md` + `.claude/specs/reflected-xss-fix-plan.md` — VULN-3 fix
 
 Prompts that generated each spec/plan/implementation live under `docs/prompts/`.
