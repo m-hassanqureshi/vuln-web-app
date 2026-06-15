@@ -56,7 +56,8 @@ async def search_user(q: str = ""):
         return HTMLResponse(content="<h3>No search query provided</h3>")
 
     # FIXED: SQL Injection closed by using parameterized query
-    # VULNERABILITY #3: Reflected XSS still preserved -- query interpolated into HTML without escaping
+    # FIXED: Reflected XSS closed -- q, row columns, and exception text are HTML-escaped before splicing.
+    # The raw values remain in the URL and in the database (output-encoding fix, not input filtering).
     query = "SELECT username, email FROM users WHERE username LIKE ? OR email LIKE ?"
 
     conn = get_db()
@@ -64,14 +65,18 @@ async def search_user(q: str = ""):
         cursor = conn.execute(query, [f"%{q}%", f"%{q}%"])
         rows = cursor.fetchall()
 
+        safe_q = html.escape(q, quote=True)
         results = ""
         for row in rows:
-            results += f"<li>{row[0]} ({row[1]})</li>"
+            safe_username = html.escape(row[0], quote=True)
+            safe_email = html.escape(row[1], quote=True)
+            results += f"<li>{safe_username} ({safe_email})</li>"
 
-        html = f"<h3>Search results for: {q}</h3><ul>{results}</ul>"
-        return HTMLResponse(content=html)
+        page = f"<h3>Search results for: {safe_q}</h3><ul>{results}</ul>"
+        return HTMLResponse(content=page)
     except Exception as e:
-        return HTMLResponse(content=f"<h3>Error: {str(e)}</h3>")
+        safe_error = html.escape(str(e), quote=True)
+        return HTMLResponse(content=f"<h3>Error: {safe_error}</h3>")
     finally:
         conn.close()
 
