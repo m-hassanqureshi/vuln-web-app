@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('theme');
+                if (saved !== 'light' && saved !== 'dark') {
+                    saved = null;
+                }
+                var theme = saved;
+                if (!theme && window.matchMedia) {
+                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                if (!theme) {
+                    theme = 'light';
+                }
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+    <title>Profile - Security Vulnerability Lab</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="dashboard-body">
+    <!-- Shared Header -->
+    <header class="header">
+        <div class="header-title">Security Vulnerability Lab</div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
+            <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
+        </button>
+        <div class="header-logos">
+            <img src="/static/images/PUCIT_Logo.png" alt="PUCIT" class="header-logo">
+            <img src="/static/images/excaliat-logo.png" alt="Excaliat" class="header-logo">
+            <img src="/static/images/blue-logo-scl2.png" alt="FCCU" class="header-logo">
+        </div>
+    </header>
+
+    <!-- Hero Banner -->
+    <section class="hero-banner">
+        <div class="hero-left">
+            <h1 class="hero-title">My Profile</h1>
+            <p class="hero-subtitle">View your account and manage your password</p>
+        </div>
+        <div class="hero-right">
+            <a href="/welcome" class="btn btn-logout">Dashboard</a>
+            <a href="/logout" class="btn btn-logout">Logout</a>
+        </div>
+    </section>
+
+    <!-- Content Area -->
+    <main class="dashboard-content profile-content">
+        <!-- Account Information -->
+        <div class="profile-card">
+            <h2 class="section-title">Account Information</h2>
+            <div class="profile-field">
+                <span class="profile-field-label">Username</span>
+                <span class="profile-field-value">{{username}}</span>
+            </div>
+            <div class="profile-field">
+                <span class="profile-field-label">Email</span>
+                <span class="profile-field-value">{{email}}</span>
+            </div>
+        </div>
+
+        <!-- Change Password -->
+        <div class="profile-card">
+            <h2 class="section-title">Change Password</h2>
+            <form id="change-password-form">
+                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+                <div class="form-group">
+                    <label class="form-label" for="current_password">Current Password</label>
+                    <input type="password" id="current_password" name="current_password" class="form-input" placeholder="Enter your current password" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="new_password">New Password</label>
+                    <input type="password" id="new_password" name="new_password" class="form-input" placeholder="Enter a new password" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="confirm_new_password">Confirm New Password</label>
+                    <input type="password" id="confirm_new_password" class="form-input" placeholder="Re-enter the new password" required>
+                </div>
+                <div id="profile-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary">Update Password</button>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        const form = document.getElementById('change-password-form');
+        const msg = document.getElementById('profile-message');
+
+        function show(text, ok) {
+            msg.textContent = text;
+            msg.classList.remove('is-error', 'is-success');
+            msg.classList.add(ok ? 'is-success' : 'is-error');
+            msg.style.display = 'block';
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const newPw = document.getElementById('new_password').value;
+            const confirmPw = document.getElementById('confirm_new_password').value;
+
+            if (newPw !== confirmPw) {
+                show('New passwords do not match', false);
+                return;
+            }
+
+            // Enforce the same strength policy the signup page advertises
+            // (length >= 8 plus lower/upper/digit/special). The strength meter
+            // UI is intentionally NOT shown here, but the rules still apply;
+            // the server runs the identical check as the authoritative gate.
+            const policy = [
+                { test: function (v) { return v.length >= 8; },        label: 'at least 8 characters' },
+                { test: function (v) { return /[a-z]/.test(v); },      label: 'a lowercase letter' },
+                { test: function (v) { return /[A-Z]/.test(v); },      label: 'an uppercase letter' },
+                { test: function (v) { return /[0-9]/.test(v); },      label: 'a digit' },
+                { test: function (v) { return /[^A-Za-z0-9]/.test(v); }, label: 'a special character' }
+            ];
+            const unmet = policy.filter(function (r) { return !r.test(newPw); })
+                                .map(function (r) { return r.label; });
+            if (unmet.length) {
+                show('New password must include: ' + unmet.join(', '), false);
+                return;
+            }
+
+            // Send as application/x-www-form-urlencoded (NOT multipart). The
+            // CSRF middleware only parses urlencoded bodies, so wrapping the
+            // FormData in URLSearchParams makes the browser set the matching
+            // Content-Type and the csrf_token field is validated correctly.
+            const body = new URLSearchParams(new FormData(form));
+            try {
+                const response = await fetch('/profile/password', { method: 'POST', body: body });
+                const data = await response.json();
+                if (data.success) {
+                    show(data.message || 'Password updated successfully', true);
+                    form.reset();
+                } else {
+                    show(data.error || 'Could not update password', false);
+                }
+            } catch (err) {
+                show('Something went wrong. Please try again.', false);
+            }
+        });
+    </script>
+
+    <script>
+        (function () {
+            var toggle = document.getElementById('theme-toggle');
+            if (!toggle) return;
+
+            function reflect(theme) {
+                var nextAction = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+                var icon = theme === 'dark' ? '☀' : '🌙';
+                toggle.setAttribute('aria-label', nextAction);
+                var iconEl = toggle.querySelector('.theme-toggle-icon');
+                if (iconEl) iconEl.textContent = icon;
+            }
+
+            reflect(document.documentElement.getAttribute('data-theme') || 'light');
+
+            toggle.addEventListener('click', function () {
+                var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                var next = current === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                try {
+                    localStorage.setItem('theme', next);
+                } catch (e) {
+                    /* persistence unavailable — in-page state still flips */
+                }
+                reflect(next);
+            });
+        })();
+    </script>
+</body>
+</html>

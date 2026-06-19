@@ -139,6 +139,8 @@ The app starts at **http://localhost:3001**. The database file (`vulnerable_app.
 | GET | `/login` | Display login form | No |
 | POST | `/login` | Authenticate user (returns JSON) | No |
 | GET | `/welcome` | Protected dashboard | Yes |
+| GET | `/profile` | Authenticated profile page (view info + change password form) | Yes |
+| POST | `/profile/password` | Change the logged-in user's password (returns JSON) | Yes |
 | GET | `/logout` | Terminate session | No |
 | GET | `/search?q=` | Search users | No |
 
@@ -217,7 +219,7 @@ The dark mode toggle is **done** (shipped in v0.1.1) and the password strength m
 |---|---------|-------------|--------|
 | 0 | Dark Mode Toggle | Light/dark theme toggle on login, signup, and dashboard pages; preference saved in `localStorage`, restored before first paint to avoid FOUC, with `prefers-color-scheme` fallback. | **Done (v0.1.1)** |
 | 1 | Password Strength Meter | A real-time, frontend-only indicator on the signup form: a colored bar (Very Weak → Strong), a live checklist of five acceptance criteria (min length 8, lowercase, uppercase, digit, special character), and a `data-theme`-aware color palette. Advisory only — the backend still accepts any non-empty password. | **Done (v1.0.1)** |
-| 2 | User Profile Page | A page where authenticated users can view and save their personal information and account settings. This also moves the dark-mode preference from per-browser (`localStorage`) to **per-user** — stored on the account so the theme choice follows the user across browsers and devices. | Planned |
+| 2 | User Profile Page | Authenticated `/profile` page: view your username and email (read-only) and change your password (current-password check + bcrypt). The new password must meet the same five-criteria strength policy as signup (length ≥ 8 plus lower/upper/digit/special), enforced client- and server-side (no meter widget shown). CSRF-protected, rate-limited, no schema change. Dark-mode stays per-browser (`localStorage`). | **Done (v1.0.2)** |
 | 3 | Email Verification on Signup | During registration, send a confirmation email containing a verification token/link to confirm the address actually exists; the account is activated only after the user clicks the link. | Planned |
 | 4 | Change Password | A dedicated page that lets authenticated users change their password, verifying the current password before setting a new one. | Planned |
 | 5 | Continue with Google (OAuth 2.0) | Allow users to sign up and log in using their Google account via the OAuth 2.0 authorization flow. | Planned |

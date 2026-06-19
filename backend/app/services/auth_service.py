@@ -15,6 +15,7 @@ Closed vulnerabilities relevant to this file:
   per-call salt makes SQL equality matching impossible).
 """
 
+import re
 import sqlite3
 
 from starlette.requests import Request
@@ -22,6 +23,27 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from app.db.session import get_db
 from app.core.security import hash_password, verify_password
+
+
+def password_meets_policy(password: str) -> bool:
+    """Return True when `password` satisfies the same five criteria the
+    signup page's strength meter checks: length >= 8 plus at least one
+    lowercase letter, one uppercase letter, one digit, and one special
+    (non-alphanumeric) character.
+
+    On signup the meter is advisory only (the server accepts any non-empty
+    password). The change-password flow, by contrast, ENFORCES this policy
+    server-side so a weak new password is rejected regardless of the client
+    -- the profile form runs the identical check in JS for inline feedback,
+    but this function is the authoritative gate.
+    """
+    return (
+        len(password) >= 8
+        and re.search(r"[a-z]", password) is not None
+        and re.search(r"[A-Z]", password) is not None
+        and re.search(r"[0-9]", password) is not None
+        and re.search(r"[^A-Za-z0-9]", password) is not None
+    )
 
 
 def signup(username: str, email: str, password: str):
@@ -156,3 +178,94 @@ def login(request: Request, username: str, password: str):
             content={"error": "Invalid username or password"},
             status_code=401,
         )
+
+
+def change_password(request: Request, current_password: str, new_password: str):
+    """Change the logged-in user's password.
+
+    Returns JSON for every outcome (mirrors login()) so the profile page's
+    fetch() handler can render feedback inline without a reload:
+    - 200 {"success": True, "message": "Password updated successfully"}
+    - 401 {"error": "Not authenticated"}              (no session user_id / row gone)
+    - 400 {"error": "Current and new password are required"}  (empty input)
+    - 401 {"error": "Current password is incorrect"}  (bad/legacy current pw)
+    - 400 {"error": "Could not update password"}       (unexpected DB error)
+
+    Security posture (all preserved from the closed vulnerabilities):
+    - VULN-1: the SELECT and UPDATE are parameterized -- never concatenate.
+    - VULN-5: the current password is checked with verify_password() (bcrypt,
+      fails closed on legacy MD5) and the new password is hashed with
+      hash_password() (bcrypt) before storage.
+    The CSRF token and per-IP rate limit are enforced by middleware before
+    this function ever runs.
+    """
+    # Auth gate. The route also renders /profile only for sessions, and the
+    # CSRF middleware already blocks a session-less POST at 403 -- this is
+    # defense in depth so the service is safe to call directly.
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    if not current_password or not new_password:
+        return JSONResponse(
+            content={"error": "Current and new password are required"},
+            status_code=400,
+        )
+
+    # Enforce the same strength policy the signup page advertises (length >= 8
+    # plus lower/upper/digit/special). Unlike signup -- where the meter is
+    # advisory and the server accepts anything -- the change-password flow
+    # rejects a weak new password server-side. The profile form runs the
+    # identical check in JS, but this is the authoritative gate.
+    if not password_meets_policy(new_password):
+        return JSONResponse(
+            content={
+                "error": (
+                    "New password must be at least 8 characters and include an "
+                    "uppercase letter, a lowercase letter, a digit, and a special "
+                    "character"
+                )
+            },
+            status_code=400,
+        )
+
+    # FIXED: SQL Injection closed -- parameterized SELECT by primary key.
+    select_query = "SELECT * FROM users WHERE id = ?"
+    # FIXED: SQL Injection closed -- parameterized UPDATE by primary key.
+    update_query = "UPDATE users SET password = ? WHERE id = ?"
+
+    conn = get_db()
+    try:
+        cursor = conn.execute(select_query, [user_id])
+        user = cursor.fetchone()
+        if not user:
+            # Session references a row that no longer exists (no delete flow
+            # exists, so this is defensive only).
+            return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+        # FIXED: Weak Password Storage closed -- verify the CURRENT password
+        # with bcrypt in Python. Returns False (never raises) on a legacy MD5
+        # row, so such accounts cannot change their password here; they must
+        # re-register, exactly like the login flow.
+        if not verify_password(current_password, user["password"]):
+            return JSONResponse(
+                content={"error": "Current password is incorrect"},
+                status_code=401,
+            )
+
+        # FIXED: Weak Password Storage closed -- hash the NEW password with
+        # bcrypt before it touches the DB. The plaintext never persists.
+        hashed = hash_password(new_password)
+        conn.execute(update_query, [hashed, user_id])
+        conn.commit()
+        return JSONResponse(
+            content={"success": True, "message": "Password updated successfully"}
+        )
+    except Exception:
+        # Generic error -- never reflect the underlying DB exception text.
+        return JSONResponse(
+            content={"error": "Could not update password"},
+            status_code=400,
+        )
+    finally:
+        conn.close()

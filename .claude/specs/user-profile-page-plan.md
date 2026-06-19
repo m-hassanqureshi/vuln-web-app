@@ -86,9 +86,31 @@ Add a single new function `change_password(request, current_password, new_passwo
 
 ### 1.2 Imports
 
-No new imports are required. The file already imports `sqlite3`, `Request`, `JSONResponse` (alongside `RedirectResponse`, `HTMLResponse`), `get_db`, `hash_password`, and `verify_password` — every symbol `change_password()` needs.
+One new import is required: `import re` (stdlib) for the strength-policy regexes in `password_meets_policy()`. The file already imports `sqlite3`, `Request`, `JSONResponse` (alongside `RedirectResponse`, `HTMLResponse`), `get_db`, `hash_password`, and `verify_password` — every other symbol `change_password()` needs.
 
 ### 1.3 Function to Append (after `login()`)
+
+A module-level helper `password_meets_policy()` is added near the top of the file (after the imports) and called from `change_password()`:
+
+```python
+def password_meets_policy(password: str) -> bool:
+    """Return True when `password` satisfies the same five criteria the
+    signup page's strength meter checks: length >= 8 plus at least one
+    lowercase letter, one uppercase letter, one digit, and one special
+    (non-alphanumeric) character.
+
+    On signup the meter is advisory only (the server accepts any non-empty
+    password). The change-password flow ENFORCES this policy server-side so
+    a weak new password is rejected regardless of the client.
+    """
+    return (
+        len(password) >= 8
+        and re.search(r"[a-z]", password) is not None
+        and re.search(r"[A-Z]", password) is not None
+        and re.search(r"[0-9]", password) is not None
+        and re.search(r"[^A-Za-z0-9]", password) is not None
+    )
+```
 
 ```python
 def change_password(request: Request, current_password: str, new_password: str):
@@ -117,11 +139,25 @@ def change_password(request: Request, current_password: str, new_password: str):
     if not user_id:
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
 
-    # No server-side strength policy -- advisory only, consistent with signup.
-    # We only require both fields to be non-empty.
     if not current_password or not new_password:
         return JSONResponse(
             content={"error": "Current and new password are required"},
+            status_code=400,
+        )
+
+    # Enforce the same strength policy the signup page advertises (length >= 8
+    # plus lower/upper/digit/special). Unlike signup -- where the meter is
+    # advisory and the server accepts anything -- this flow rejects a weak new
+    # password server-side. The profile form runs the identical check in JS.
+    if not password_meets_policy(new_password):
+        return JSONResponse(
+            content={
+                "error": (
+                    "New password must be at least 8 characters and include an "
+                    "uppercase letter, a lowercase letter, a digit, and a special "
+                    "character"
+                )
+            },
             status_code=400,
         )
 
@@ -171,9 +207,10 @@ def change_password(request: Request, current_password: str, new_password: str):
 
 | Block | Decision | Spec ref |
 |---|---|---|
-| No new imports | Every needed symbol (`Request`, `JSONResponse`, `get_db`, `hash_password`, `verify_password`) is already imported | FR-13 |
+| `import re` added | Needed by `password_meets_policy()`; every other symbol (`Request`, `JSONResponse`, `get_db`, `hash_password`, `verify_password`) is already imported | FR-13 |
 | `user_id = request.session.get("user_id")` → 401 if falsy | Auth gate at the service layer; defense-in-depth behind CSRF + the route's own gate | FR-06.1, NFR-02, EC-01 |
-| `if not current_password or not new_password` → 400 | Non-empty validation only; no strength policy (advisory, like signup) | FR-06.2, §2.4 |
+| `if not current_password or not new_password` → 400 | Non-empty validation for both fields | FR-06.2 |
+| `if not password_meets_policy(new_password)` → 400 | Enforce the five-criteria signup strength policy server-side on the new password | FR-06.2a, §2.4 |
 | `SELECT * FROM users WHERE id = ?` | Parameterized fetch by primary key — VULN-1 stays closed | FR-11, AC-10 |
 | `if not user: 401` | Defensive — session points at a missing row | FR-06.4, EC-07 |
 | `verify_password(current_password, user["password"])` | bcrypt check in Python; fails closed on legacy MD5 | FR-06.5, FR-11, EC-06 |
@@ -187,7 +224,7 @@ def change_password(request: Request, current_password: str, new_password: str):
 - **DO NOT** modify `signup()` or `login()` — byte-for-byte unchanged (spec §FR-13, AC-14).
 - **DO NOT** concatenate any value into a SQL string. Both queries are parameterized (VULN-1).
 - **DO NOT** introduce a new hashing primitive or touch `core/security.py` (VULN-5).
-- **DO NOT** add a server-side password-strength check (advisory only — spec §2.4).
+- **DO** enforce the five-criteria strength policy on `new_password` via `password_meets_policy()` (spec §2.4, FR-06.2a). Keep the JS check in `profile.html` in sync with this server-side gate. Do **not** weaken `signup()` to match — signup stays advisory.
 - **DO NOT** clear the session or log the user out on success (out of scope — spec §2.4).
 - **DO NOT** return an HTML response — `change_password()` returns JSON for every path (FR-07).
 - **DO NOT** reflect the underlying DB exception text to the client (NFR-06).
@@ -199,13 +236,15 @@ grep -n 'def change_password' backend/app/services/auth_service.py
 grep -n 'SELECT \* FROM users WHERE id = ?' backend/app/services/auth_service.py
 grep -n 'UPDATE users SET password = ? WHERE id = ?' backend/app/services/auth_service.py
 grep -n 'hash_password(\|verify_password(' backend/app/services/auth_service.py
+# strength-policy helper + gate present
+grep -n 'def password_meets_policy\|password_meets_policy(new_password)' backend/app/services/auth_service.py
 # signup/login still present and unchanged in shape
 grep -n 'def signup\|def login' backend/app/services/auth_service.py
-# module imports cleanly
-cd backend && uv run python -c "from app.services import auth_service; print(hasattr(auth_service, 'change_password'))" && cd ..
+# module imports cleanly + policy helper behaves
+cd backend && uv run python -c "from app.services import auth_service as a; print(hasattr(a,'change_password')); print(a.password_meets_policy('weakpass'), a.password_meets_policy('NewPass2!'))" && cd ..
 ```
 
-Expected: the function and both parameterized queries match; the bcrypt helpers are referenced; `signup`/`login` still present; the import check prints `True`.
+Expected: the function and both parameterized queries match; the bcrypt helpers and `password_meets_policy` are referenced; `signup`/`login` still present; the import check prints `True` then `False True`.
 
 ---
 
@@ -493,6 +532,7 @@ Create the file with exactly this content:
 | `#profile-message` with `role="status"` `aria-live="polite"` | Inline success/error feedback, announced politely | FR-04, FR-08 |
 | `new URLSearchParams(new FormData(form))` in the fetch | Sends urlencoded so CSRF accepts it — copies the login.html fix | FR-08, plan §0.1 |
 | `new_password === confirm_new_password` check before fetch | Client-side match guard, mirrors signup; shows inline error, no request sent | FR-08, SP-04 |
+| Five-criteria strength check before fetch | Mirrors the signup meter's rules (≥8, lower, upper, digit, special); shows which requirements are unmet inline, no request sent. The meter **widget** is not rendered — only the rules. Server re-checks via `password_meets_policy()` | FR-06.2a, §2.4 |
 | `form.reset()` on success | Clears the password fields after a successful change | FR-08 |
 | Theme-toggle `<script>` at the end | Byte-identical to the other pages | FR-09 |
 
@@ -502,7 +542,7 @@ Create the file with exactly this content:
 - **DO NOT** give `confirm_new_password` a `name` attribute (it must not be sent to the server).
 - **DO NOT** submit raw `new FormData(form)` — it would send multipart and CSRF would 403. Wrap in `URLSearchParams`.
 - **DO NOT** write theme state to the server, the session, or a cookie — only `localStorage` (frontend-only, VULN/CLAUDE.md rule).
-- **DO NOT** add a password-strength meter, a reveal toggle, or any field beyond the three specified (scope — spec §2.4).
+- **DO** validate `new_password` against the five-criteria policy (≥8, lower, upper, digit, special) before the fetch, mirroring the server-side `password_meets_policy()` gate; show unmet requirements inline. **DO NOT** render the strength-meter widget/checklist UI (only the rules apply) or add a reveal toggle or any field beyond the three specified (scope — spec §2.4).
 - **DO NOT** add `fetch`/`XMLHttpRequest` calls other than the single `/profile/password` POST.
 
 ### 3.5 Phase 3 Verification (Pre-Server)
@@ -876,7 +916,7 @@ The six modified files snap back to their pre-feature state and the new template
 - **No member-since / `created_at` column** — would be the first schema change; deferred.
 - **No per-user theme** — dark mode stays frontend-only (`localStorage`); the profile page gets the same toggle as every other page.
 - **No infra-dependent features** (email verification, OAuth, MFA, OTP, CAPTCHA, lockout) — not even disabled placeholders; each is a future spec that extends this page.
-- **No password-strength gate on the new password** — advisory only, consistent with signup.
+- **Strength gate on the new password (amended)** — the new password is enforced against the signup five-criteria policy server-side (`password_meets_policy()`) and mirrored in the profile form's JS. The strength-meter *widget* is not rendered. `signup()` itself stays advisory (unchanged).
 - **No "new must differ from current" rule.**
 - **No session invalidation / forced re-login after a password change.**
 - **No new middleware, no middleware re-ordering, no `main.py` edit.**

@@ -792,3 +792,78 @@ a:hover {
     text-align: center;
     font-weight: 700;
 }
+
+/* ============================================================
+ * User Profile Page (authenticated /profile, change-password).
+ * Reuses the dashboard surface/border/text variables so light
+ * and dark themes are handled automatically. The success palette
+ * is the only addition (no success colors existed before); it is
+ * declared theme-aware under both :root and [data-theme="dark"].
+ * ============================================================ */
+
+:root {
+    --color-success-bg:     #dcfce7;
+    --color-success-border: #86efac;
+    --color-success-text:   #166534;
+}
+
+[data-theme="dark"] {
+    --color-success-bg:     #102a18;
+    --color-success-border: #14532d;
+    --color-success-text:   #86efac;
+}
+
+.profile-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.profile-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.profile-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border-soft);
+}
+
+.profile-field:last-child {
+    border-bottom: none;
+}
+
+.profile-field-label {
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.profile-field-value {
+    color: var(--color-text-primary);
+    word-break: break-all;
+}
+
+.profile-message {
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.profile-message.is-error {
+    background: var(--color-error-bg);
+    border: 1px solid var(--color-error-border);
+    color: var(--color-error-text);
+}
+
+.profile-message.is-success {
+    background: var(--color-success-bg);
+    border: 1px solid var(--color-success-border);
+    color: var(--color-success-text);
+}

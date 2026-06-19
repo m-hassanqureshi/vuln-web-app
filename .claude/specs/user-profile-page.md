@@ -75,7 +75,7 @@ The implementation touches:
 - **No "member-since" / account-creation date.** Displaying a join date would require a new `created_at` column — the **first-ever schema change** in the project, with a migration story for legacy rows. It is intentionally deferred to keep this feature schema-free. The `users` table is byte-for-byte unchanged.
 - **No per-user theme persistence.** The dark-mode preference stays **frontend-only** (`localStorage`), exactly as it is on every other page. The profile page carries the *same* toggle button and the *same* pre-paint theme script; it does **not** push theme state into the session, the database, or any new column. The standing CLAUDE.md rule ("dark mode is purely frontend") is preserved.
 - **No infra-dependent account features.** Email verification, OAuth ("Continue with Google/GitHub"), MFA/TOTP, email OTP, QR-code login, CAPTCHA, and account lockout are **not** shown on the page in any form — not even as disabled "coming soon" placeholders. Each is a separate future spec that will extend this page.
-- **No password-strength gate on the new password.** Consistent with signup (the strength meter is advisory; the backend accepts any non-empty password), `change_password()` accepts any non-empty `new_password`. No length/character-class/regex policy is added server-side. (Whether to reuse the existing password-strength-meter widget on this form is a future enhancement, not this one.)
+- **Strength policy on the new password (amended v1.0.2).** The new password MUST satisfy the same five criteria the signup strength meter advertises — length ≥ 8 plus at least one lowercase letter, one uppercase letter, one digit, and one special (non-alphanumeric) character. Unlike signup (where the meter is advisory and the backend accepts any non-empty password), `change_password()` ENFORCES this policy server-side via `password_meets_policy()` and the profile form mirrors it in JS for inline feedback. The strength-meter **widget** itself is intentionally NOT rendered on the profile form — only the rules apply.
 - **No "new password must differ from current" rule.** Allowing a user to "change" to the same password is harmless for the lab and avoids an extra branch. Not enforced.
 - **No account deletion, no username change, no avatar/upload, no bio/profile fields.** Only `username`/`email` view and password change.
 - **No new middleware and no middleware re-ordering.** The existing `CSRFMiddleware` / `SessionMiddleware` / `RateLimitMiddleware` stack handles the new POST route automatically. `main.py` is not modified.
@@ -111,7 +111,7 @@ The change MUST touch only the following files. No other repository file may be 
 |------|-------------|---------|
 | `frontend/templates/profile.html` | **New** | The profile page: account-info card, change-password form (CSRF hidden field first), theme toggle, inline fetch script |
 | `backend/app/api/routes/auth.py` | Modified | Add `GET /profile` (auth-gated render + CSRF/username/email splice) and `POST /profile/password` (auth-gated, forwards to service); add one import of `auth_service` is already present — add nothing else but the two handlers |
-| `backend/app/services/auth_service.py` | Modified | Add `change_password(request, current_password, new_password)` (parameterized SELECT + bcrypt verify + parameterized UPDATE); `signup()` / `login()` unchanged |
+| `backend/app/services/auth_service.py` | Modified | Add `change_password(request, current_password, new_password)` (parameterized SELECT + bcrypt verify + parameterized UPDATE) and the `password_meets_policy()` helper (`import re` added); `signup()` / `login()` unchanged |
 | `frontend/templates/dashboard.html` | Modified | Add one "Profile" link to `/profile` in the hero-right area |
 | `frontend/static/css/styles.css` | Modified | Append profile-page rules using existing `var(--...)` theme custom properties |
 | `README.md` | Modified | Move "User Profile Page" to a "Done (v1.0.2)" row; add the two new endpoints to the API table |
@@ -174,6 +174,7 @@ Files that MUST NOT be modified by this change:
 
 1. Read `user_id = request.session.get("user_id")`. If falsy, return `JSONResponse({"error": "Not authenticated"}, status_code=401)`.
 2. If `current_password` or `new_password` is empty, return `JSONResponse({"error": "Current and new password are required"}, status_code=400)`.
+2a. If `new_password` fails the strength policy (length ≥ 8 plus lower/upper/digit/special — see `password_meets_policy()`), return `JSONResponse({"error": "New password must be at least 8 characters and include an uppercase letter, a lowercase letter, a digit, and a special character"}, status_code=400)`.
 3. Fetch the user row with a **parameterized** query: `SELECT * FROM users WHERE id = ?`, binding `user_id`.
 4. If no row is found, return `JSONResponse({"error": "Not authenticated"}, status_code=401)` (defensive — should not happen for a valid session).
 5. Verify the current password: `if not verify_password(current_password, row["password"]): return JSONResponse({"error": "Current password is incorrect"}, status_code=401)`. This also fails closed for legacy MD5 rows (they cannot change their password and must re-register — consistent with the login flow).
@@ -218,7 +219,7 @@ Files that MUST NOT be modified by this change:
 
 ### FR-13: Existing Service Functions Unchanged
 
-- `signup()` and `login()` in `auth_service.py` MUST remain byte-for-byte unchanged. Only a new `change_password()` function is added (plus, if needed, the existing imports already cover `get_db`, `hash_password`, `verify_password`, `JSONResponse`, `Request`).
+- `signup()` and `login()` in `auth_service.py` MUST remain byte-for-byte unchanged. The additions are the new `change_password()` function and the `password_meets_policy()` helper, plus a single new `import re` (stdlib) for the policy regexes; the existing imports already cover `get_db`, `hash_password`, `verify_password`, `JSONResponse`, `Request`.
 
 ---
 

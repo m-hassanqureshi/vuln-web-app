@@ -209,6 +209,53 @@ async def welcome_page(request: Request):
     return HTMLResponse(content=page)
 
 
+@router.get("/profile")
+async def profile_page(request: Request):
+    """Render the authenticated profile page.
+
+    Same auth gate as /welcome: no user_id in the session -> bounce to
+    /login. Splices the per-session CSRF token (for the change-password
+    form) plus the HTML-escaped username and email read from the session.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    username = request.session.get("username", "")
+    email = request.session.get("email", "")
+
+    with open(os.path.join(TEMPLATE_DIR, "profile.html"), "r") as f:
+        page = f.read()
+
+    # FIXED: CSRF closed -- issue/splice the per-session token for the form.
+    token = get_or_create_csrf_token(request)
+    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+
+    # FIXED: Stored XSS closed -- escape every user-controlled value before
+    # splicing (output encoding, same posture as the dashboard username).
+    page = page.replace("{{username}}", html.escape(username, quote=True))
+    page = page.replace("{{email}}", html.escape(email, quote=True))
+
+    return HTMLResponse(content=page)
+
+
+@router.post("/profile/password")
+async def profile_password_post(
+    request: Request,
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+):
+    """Handle a change-password submission.
+
+    Thin wrapper over auth_service.change_password() -- same shape as
+    login_post(). The Request is forwarded so the service can read
+    request.session["user_id"]. The CSRF token and per-IP rate limit are
+    enforced by middleware before this handler runs; FastAPI's Form()
+    ignores the extra csrf_token field.
+    """
+    return auth_service.change_password(request, current_password, new_password)
+
+
 @router.get("/logout")
 async def logout(request: Request):
     """Destroy the session and redirect to the login page.
