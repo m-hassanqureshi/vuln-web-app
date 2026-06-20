@@ -6,6 +6,18 @@
 
 This plan sequences the work so the app boots after every step and the eight closed vulnerabilities stay closed throughout. Backend primitives land first (config → schema → mailer → service), then the route wiring, then the templates/CSS, then docs.
 
+> **Amendment (v1.0.4 final):** the shipped feature **blocks login until
+> verified** instead of "allow login, restrict app". Concretely: `login()`
+> returns `401 {"unverified": true}` and writes no session for an unverified
+> local account; there is **no dashboard banner** (Step 8's banner and Step 9's
+> `.verify-banner` CSS were removed, and Step 7's `/welcome` change was
+> reverted); and **resend is credential-based** —
+> `verification_service.resend_for_credentials(username, password)` re-checks
+> the password with bcrypt, driven by a "Resend verification email" button on
+> `login.html` (shown on the `unverified` response). The `POST /verify/resend`
+> handler takes `username`/`password` form fields instead of a session. All
+> other steps are as written below.
+
 ---
 
 ## Step 0 — Preconditions

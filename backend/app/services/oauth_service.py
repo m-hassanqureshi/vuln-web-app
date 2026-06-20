@@ -91,9 +91,12 @@ def find_or_create_google_user(
             "SELECT * FROM users WHERE email = ?", [email]
         ).fetchone()
         if row:
+            # is_verified = 1: Google has already verified the address, so a
+            # linked account needs no separate email-verification step
+            # (Email-Verification feature, v1.0.4).
             conn.execute(
                 "UPDATE users SET google_id = ?, name = ?, picture = ?, "
-                "auth_provider = ? WHERE id = ?",
+                "auth_provider = ?, is_verified = 1 WHERE id = ?",
                 [google_id, name, picture, "google", row["id"]],
             )
             conn.commit()
@@ -104,11 +107,14 @@ def find_or_create_google_user(
                 ).fetchone()
             )
 
-        # 3) Brand-new Google account. password is NULL (no bcrypt hash).
+        # 3) Brand-new Google account. password is NULL (no bcrypt hash) and
+        #    is_verified is 1 -- Google has already verified the email, so no
+        #    separate verification step is needed (Email-Verification, v1.0.4).
         username = _unique_username(conn, _sanitize(email or name))
         cur = conn.execute(
             "INSERT INTO users (username, email, password, google_id, name, "
-            "picture, auth_provider) VALUES (?, ?, NULL, ?, ?, ?, 'google')",
+            "picture, auth_provider, is_verified) "
+            "VALUES (?, ?, NULL, ?, ?, ?, 'google', 1)",
             [username, email, google_id, name, picture],
         )
         conn.commit()

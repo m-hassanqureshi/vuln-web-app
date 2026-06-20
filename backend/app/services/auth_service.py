@@ -23,6 +23,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from app.db.session import get_db
 from app.core.security import hash_password, verify_password
+from app.services import verification_service
 
 
 def password_meets_policy(password: str) -> bool:
@@ -78,17 +79,20 @@ def signup(username: str, email: str, password: str):
     # SQLite driver binds the values without any string interpolation --
     # crafted input like `'); DROP TABLE users; --` is treated as data,
     # not as SQL.
-    query = "INSERT INTO users (username, email, password) VALUES (?, ?, ?)"
+    #
+    # is_verified is listed explicitly as 0: a brand-new local account starts
+    # UNVERIFIED until the user clicks the link in the verification email
+    # (Email-Verification feature, v1.0.4). Google/OAuth accounts are created
+    # as 1 in oauth_service.py instead.
+    query = "INSERT INTO users (username, email, password, is_verified) VALUES (?, ?, ?, 0)"
 
     conn = get_db()
     try:
-        conn.execute(query, [username, email, hashed])
+        cursor = conn.execute(query, [username, email, hashed])
         conn.commit()
-        # 302 makes the browser issue a fresh GET to /login. We do NOT log
-        # the user in here -- forcing them to authenticate exercises the
-        # password they just chose (and ends up writing the session cookie
-        # via the login flow).
-        return RedirectResponse(url="/login", status_code=302)
+        # Capture the new row id BEFORE closing the connection so we can issue
+        # the verification token against it.
+        user_id = cursor.lastrowid
     except sqlite3.IntegrityError:
         # Triggered by the `UNIQUE` constraint on `username`. Distinct from
         # the generic Exception branch below so the user gets a precise
@@ -108,6 +112,20 @@ def signup(username: str, email: str, password: str):
         )
     finally:
         conn.close()
+
+    # Account created. Now that the row exists (and the connection is closed),
+    # issue a verification token and email the link. background=True hands the
+    # SMTP send to a daemon thread so the signup response (the "check your
+    # inbox" page) returns immediately instead of waiting on the Gmail
+    # handshake. A failed/unconfigured send is NOT fatal -- the account stands
+    # and the user can resend from the login page (Email-Verification, v1.0.4).
+    # The signup routes already gate on is_email_configured(), so this is only
+    # reached when SMTP is configured.
+    verification_service.start_verification(user_id, username, email, background=True)
+
+    # 302 to the "check your inbox" page instead of straight to /login: the
+    # account is unverified and the user must confirm via the emailed link.
+    return RedirectResponse(url="/check-email", status_code=302)
 
 
 def login(request: Request, username: str, password: str):
@@ -162,6 +180,23 @@ def login(request: Request, username: str, password: str):
     # verify_password() returns False rather than raising on a malformed
     # hash, so legacy MD5 rows fail closed here -- they cannot log in.
     if user and verify_password(password, user["password"]):
+        # Email-Verification gate (v1.0.4): a correct password is NOT enough --
+        # the account must be verified before a session is created. Google
+        # accounts and grandfathered legacy accounts are is_verified=1, so they
+        # pass straight through. The `unverified` flag lets the login page
+        # reveal a "Resend verification email" affordance. No session is
+        # written, so an unverified user cannot reach /welcome.
+        if not user["is_verified"]:
+            return JSONResponse(
+                content={
+                    "error": (
+                        "Please verify your email before logging in. "
+                        "Check your inbox for the verification link."
+                    ),
+                    "unverified": True,
+                },
+                status_code=401,
+            )
         # Populate the session. SessionMiddleware serializes this dict
         # and writes it back as a signed cookie on the response. The
         # CSRF token (already in the session from the prior GET /login

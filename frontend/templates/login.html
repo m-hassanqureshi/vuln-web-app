@@ -67,6 +67,15 @@
 
                 <div id="error-message" class="error-message" style="display: none;"></div>
 
+                <!-- Shown only when login fails because the email isn't verified
+                     yet (v1.0.4). The resend reuses the username+password just
+                     entered; the server re-checks them with bcrypt before
+                     re-sending, so it can't be used to spam a stranger. -->
+                <div id="resend-area" style="display: none; margin-bottom: 16px;">
+                    <button type="button" id="resend-btn" class="btn btn-primary">Resend verification email</button>
+                    <div id="resend-message" class="error-message" style="display: none; margin-top: 12px;"></div>
+                </div>
+
                 <form id="login-form">
                     <input type="hidden" name="csrf_token" value="{{csrf_token}}">
                     <div class="form-group">
@@ -103,10 +112,16 @@
     <script>
         const form = document.getElementById('login-form');
         const errorDiv = document.getElementById('error-message');
+        const resendArea = document.getElementById('resend-area');
+        const resendBtn = document.getElementById('resend-btn');
+        const resendMsg = document.getElementById('resend-message');
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             errorDiv.style.display = 'none';
+            // Hide any prior resend affordance/feedback on a new attempt.
+            resendArea.style.display = 'none';
+            resendMsg.style.display = 'none';
 
             // Send as application/x-www-form-urlencoded (not multipart). The
             // CSRF middleware only parses urlencoded bodies, so wrapping the
@@ -124,7 +139,32 @@
             } else {
                 errorDiv.textContent = data.error;
                 errorDiv.style.display = 'block';
+                // Email-verification gate (v1.0.4): the password was correct but
+                // the account isn't verified -- offer to re-send the link.
+                if (data.unverified) {
+                    resendArea.style.display = 'block';
+                }
             }
+        });
+
+        // Resend the verification email using the credentials already typed
+        // into the form. Posts urlencoded (same reason as login) so the hidden
+        // csrf_token validates; the server re-checks the password with bcrypt.
+        resendBtn.addEventListener('click', async () => {
+            resendMsg.style.display = 'none';
+            const body = new URLSearchParams({
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+                csrf_token: form.querySelector('input[name="csrf_token"]').value
+            });
+            try {
+                const response = await fetch('/verify/resend', { method: 'POST', body });
+                const data = await response.json();
+                resendMsg.textContent = data.message || data.error || 'Could not resend the email.';
+            } catch (err) {
+                resendMsg.textContent = 'Could not resend the email. Please try again.';
+            }
+            resendMsg.style.display = 'block';
         });
     </script>
 

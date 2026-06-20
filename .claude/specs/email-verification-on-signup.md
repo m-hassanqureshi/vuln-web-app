@@ -8,6 +8,37 @@
 
 ---
 
+## 0. Amendment (v1.0.4 final — supersedes the "allow login" posture below)
+
+The shipped feature uses a **block-login-until-verified** posture, not the
+"allow login, restrict app" posture described in some sections below. Where the
+two conflict, **this amendment governs**:
+
+- `auth_service.login()` verifies the password and then **refuses to create a
+  session for an unverified local account**, returning `401 {"error": "...",
+  "unverified": true}`. Only verified (or Google / grandfathered) accounts get
+  a session, so `GET /welcome` is reached **only** by verified users.
+- **`GET /verify` auto-logs-in on success.** A valid, unexpired token verifies
+  the account, and the route then writes the same session keys as `login()` and
+  **302s to `/welcome`** (the emailed link proves control of the address), so
+  the user lands on their dashboard — they do **not** bounce back to `/login`.
+  Only expired/invalid tokens render `verify_result.html`.
+- There is therefore **no dashboard verification banner** and **no
+  session-based resend**. `GET /welcome` and `dashboard.html` are unchanged.
+- **Resend is credential-based.** The login page reveals a "Resend verification
+  email" button on the `unverified` response; it re-POSTs the username +
+  password to `POST /verify/resend`, and
+  `verification_service.resend_for_credentials()` re-checks them with bcrypt
+  before re-issuing (the correct password is the authorization; a bad
+  username/password returns the same generic `401` as login). The POST is still
+  covered by the existing CSRF + rate-limit middleware.
+
+Everything else in the spec (schema, token model, `/verify`, `/check-email`,
+the SMTP not-configured degrade, Google auto-verify, grandfathering, stdlib
+mailer, parameterized SQL, no `main.py` change, no new dependency) is unchanged.
+
+---
+
 ## 1. Overview / Purpose
 
 This document specifies the **Email Verification on Signup** enhancement. It is item #3 in the README's "Feature Enhancements" table. During registration the app sends a confirmation email containing a single-use, time-limited verification link; the user's account is marked **verified** only after they click the link.

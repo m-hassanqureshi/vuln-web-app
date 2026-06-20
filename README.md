@@ -68,8 +68,9 @@ This repository ships in several tagged releases. The versions below are the mai
 | **v1.0.1** | Students who want the complete reference **plus the first feature enhancement** | Everything in v1.0.0 plus the **password strength meter** on the signup form (real-time bar + live 5-criterion checklist, advisory only — the backend gate is unchanged). |
 | **v1.0.2** | Students who want the reference **plus the user profile page** | Everything in v1.0.1 plus the authenticated **User Profile Page** (`/profile`): view your username/email and change your password (current-password check + bcrypt, with a server-enforced strength policy). CSRF-protected, rate-limited, no schema change. |
 | **v1.0.3** | Students who want the reference **plus social login** | Everything in v1.0.2 plus **Continue with Google** (OAuth 2.0 Authorization Code flow via Authlib + OpenID Connect): new accounts are auto-created and matching emails linked, and login reuses the existing signed session. The project's **first database-schema change**; the app still runs (and the button shows a setup page) when Google isn't configured. |
+| **v1.0.4** | Students who want the reference **plus email verification** | Everything in v1.0.3 plus **Email Verification on Signup**: registration sends a single-use, 1-hour confirmation link over SMTP (stdlib only, no new dependency); accounts are created *unverified* and **cannot log in until the link is clicked**, with a credential-checked **Resend** button on the login page. Google accounts are auto-verified; the signup page shows a friendly setup page when SMTP isn't configured. Second DB-schema change (3 columns on `users`). |
 
-The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, and **v1.0.3** Continue with Google.
+The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additional vulnerability — see the [Bug Fixes](#bug-fixes) table for the version-by-version mapping. The feature-enhancement tags build on top of v1.0.0: **v1.0.1** adds the password strength meter, **v1.0.2** the User Profile Page, **v1.0.3** Continue with Google, and **v1.0.4** Email Verification on Signup.
 
 ### Download the version you want
 
@@ -154,12 +155,43 @@ OAuth client:
    ```
 6. **Restart** — `uv run backend/app/main.py`. The Google button now works.
 
-> 🔒 `.env` is **git-ignored** — never commit your real secret. The committed
-> `.env.example` only holds placeholders.
->
-> 📖 A plain-English walkthrough of the whole flow (what OAuth/cookies are, how
-> the callback works, the exact console clicks) lives in
-> [`docs/continue-with-google-explained.md`](docs/continue-with-google-explained.md).
+---
+
+## Email Verification — Setup (required for sign-up)
+
+As of **v1.0.4**, creating a username/password account sends a confirmation
+email, and the account **cannot log in until the link is clicked** (the login
+page then offers a credential-checked "Resend verification email" button).
+Because sign-up depends on email, the signup page shows a friendly **"sign-up
+isn't available yet"** page until you configure an SMTP server. (Login for
+already-verified accounts and **Continue with Google** still work without SMTP;
+Google accounts are auto-verified.)
+
+The app uses Python's standard-library SMTP client — **no extra dependency**.
+The easiest provider is Gmail with an App Password:
+
+1. **Enable 2-Step Verification** on the Google account (required before app
+   passwords exist): https://myaccount.google.com/security
+2. **Create an App Password** — https://myaccount.google.com/apppasswords —
+   name it e.g. `vuln-web-app`. Google shows a **16-character** password once.
+3. **Add the credentials locally** — copy the template and fill in your values:
+   ```bash
+   cp .env.example .env
+   # then edit .env:
+   #   SMTP_HOST=smtp.gmail.com
+   #   SMTP_PORT=587
+   #   SMTP_USER=your-address@gmail.com
+   #   SMTP_PASSWORD=your-16-char-app-password
+   #   SMTP_FROM=your-address@gmail.com
+   #   APP_BASE_URL=http://localhost:3001
+   ```
+4. **Restart** — `uv run backend/app/main.py`. Sign-up now sends verification
+   emails, and the link in the email (valid 1 hour) confirms the account.
+
+The verification token is a single-use, 1-hour `secrets.token_urlsafe(32)`
+value stored on the user's row; `APP_BASE_URL` is the public origin used to
+build the link. The real `.env` is **git-ignored** — never commit your secret;
+`.env.example` holds placeholders only.
 
 ---
 
@@ -175,6 +207,9 @@ OAuth client:
 | GET | `/welcome` | Protected dashboard | Yes |
 | GET | `/profile` | Authenticated profile page (view info + change password form) | Yes |
 | POST | `/profile/password` | Change the logged-in user's password (returns JSON) | Yes |
+| GET | `/check-email` | "Check your inbox" page shown right after signup | No |
+| GET | `/verify?token=` | Confirm an email-verification link (single-use, 1-hour token) | No |
+| POST | `/verify/resend` | Re-send the verification email to the logged-in user (returns JSON) | Yes |
 | GET | `/auth/google/login` | Start Google OAuth (or show the setup page when unconfigured) | No |
 | GET | `/auth/google/callback` | Google OAuth redirect URI: verify, create/link the user, log in via session | No |
 | GET | `/logout` | Terminate session | No |
@@ -249,14 +284,14 @@ The **weak password storage** bug (VULN-5: MD5 → bcrypt) is **fixed** as of **
 
 ## Feature Enhancements
 
-The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), and Continue with Google (v1.0.3) are **done** — see the Status column. The remaining items are **planned**.
+The dark mode toggle (v0.1.1), password strength meter (v1.0.1), User Profile Page (v1.0.2), Continue with Google (v1.0.3), and Email Verification on Signup (v1.0.4) are **done** — see the Status column. The remaining items are **planned**.
 
 | # | Feature | Description | Status |
 |---|---------|-------------|--------|
 | 0 | Dark Mode Toggle | Light/dark theme toggle on login, signup, and dashboard pages; preference saved in `localStorage`, restored before first paint to avoid FOUC, with `prefers-color-scheme` fallback. | **Done (v0.1.1)** |
 | 1 | Password Strength Meter | A real-time, frontend-only indicator on the signup form: a colored bar (Very Weak → Strong), a live checklist of five acceptance criteria (min length 8, lowercase, uppercase, digit, special character), and a `data-theme`-aware color palette. Advisory only — the backend still accepts any non-empty password. | **Done (v1.0.1)** |
 | 2 | User Profile Page | Authenticated `/profile` page: view your username and email (read-only) and change your password (current-password check + bcrypt). The new password must meet the same five-criteria strength policy as signup (length ≥ 8 plus lower/upper/digit/special), enforced client- and server-side (no meter widget shown). CSRF-protected, rate-limited, no schema change. Dark-mode stays per-browser (`localStorage`). | **Done (v1.0.2)** |
-| 3 | Email Verification on Signup | During registration, send a confirmation email containing a verification token/link to confirm the address actually exists; the account is activated only after the user clicks the link. | Planned |
+| 3 | Email Verification on Signup | Registration sends a confirmation email with a single-use, 1-hour `secrets.token_urlsafe(32)` link (stdlib `smtplib`, no new dependency). New accounts are created **unverified** and **cannot log in until the link is clicked** — the login page then offers a CSRF-protected, rate-limited, credential-checked **Resend** button. Google accounts are auto-verified; existing accounts are grandfathered; the signup page degrades to a friendly setup page when SMTP isn't configured. Second DB-schema change (3 columns). | **Done (v1.0.4)** |
 | 4 | Continue with Google (OAuth 2.0) | Sign up / log in with a Google account via the OAuth 2.0 Authorization Code flow (Authlib + OpenID Connect). New users are auto-created and existing emails are linked; login uses the **existing signed session** (no JWT, one cookie). The OAuth `state` param is the flow's CSRF defense. Credentials come from a git-ignored `.env`; with none set, the button shows a friendly setup page and the rest of the app still runs. First DB-schema change (4 nullable columns on `users`). | **Done (v1.0.3)** |
 | 5 | MFA via Authenticator App (TOTP) | Add two-factor authentication using a TOTP authenticator app (e.g., Google Authenticator or Authy) with QR-code enrollment. | Planned |
 | 6 | OTP via Email | Send a one-time passcode to the user's registered email as a second authentication factor during login. | Planned |

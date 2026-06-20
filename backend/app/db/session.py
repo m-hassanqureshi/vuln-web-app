@@ -62,18 +62,28 @@ def init_db():
     - `name` / `picture`: the Google profile display name and avatar URL
       (stored, not rendered in this release).
     - `auth_provider TEXT DEFAULT 'local'`: 'local' or 'google'.
+    - `is_verified INTEGER DEFAULT 0`: 0 = email not yet confirmed, 1 = verified.
+      Google (OAuth) accounts are created as 1; existing rows that predate the
+      Email-Verification feature are grandfathered to 1 by the migration below.
+    - `verification_token TEXT`: the active single-use email-verification token
+      (`secrets.token_urlsafe(32)`), or NULL when none is outstanding.
+    - `verification_token_expires REAL`: Unix epoch seconds after which the
+      token is dead, or NULL. Compared against `time.time()` on /verify.
     """
     conn = get_db()
     conn.execute(
         """CREATE TABLE IF NOT EXISTS users (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            username      TEXT UNIQUE,
-            email         TEXT,
-            password      TEXT,
-            google_id     TEXT UNIQUE,
-            name          TEXT,
-            picture       TEXT,
-            auth_provider TEXT DEFAULT 'local'
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            username                   TEXT UNIQUE,
+            email                      TEXT,
+            password                   TEXT,
+            google_id                  TEXT UNIQUE,
+            name                       TEXT,
+            picture                    TEXT,
+            auth_provider              TEXT DEFAULT 'local',
+            is_verified                INTEGER DEFAULT 0,
+            verification_token         TEXT,
+            verification_token_expires REAL
         )"""
     )
 
@@ -88,10 +98,23 @@ def init_db():
         "name": "ALTER TABLE users ADD COLUMN name TEXT",
         "picture": "ALTER TABLE users ADD COLUMN picture TEXT",
         "auth_provider": "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local'",
+        # Email-Verification feature (v1.0.4): three nullable/defaulted columns.
+        "is_verified": "ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0",
+        "verification_token": "ALTER TABLE users ADD COLUMN verification_token TEXT",
+        "verification_token_expires": "ALTER TABLE users ADD COLUMN verification_token_expires REAL",
     }
     for column, ddl in migrations.items():
         if column not in existing:
             conn.execute(ddl)
+            if column == "is_verified":
+                # Grandfather: accounts that predate email verification are
+                # treated as already verified, so the migration does not
+                # retroactively lock them behind the "verify your email"
+                # banner. This runs exactly once -- on the boot that first
+                # adds the column to a pre-existing database. (On a fresh DB
+                # the column comes from CREATE TABLE above and is never in
+                # this branch, so new signups keep their explicit 0.)
+                conn.execute("UPDATE users SET is_verified = 1")
 
     conn.commit()
     conn.close()
