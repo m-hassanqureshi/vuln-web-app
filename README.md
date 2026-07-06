@@ -86,9 +86,9 @@ The incremental tags between them (**v0.1.2 – v0.1.7**) each close one additio
 
 **Option A — Download a release archive (no Git required)**
 
-- v0.1.0 (all vulnerabilities open): https://github.com/m-hassanqureshi/vuln-web-app/releases/tag/v0.1.0
-- v0.1.1 (dark mode + bcrypt): https://github.com/m-hassanqureshi/vuln-web-app/releases/tag/v0.1.1
-- v1.0.0 (all vulnerabilities fixed): https://github.com/m-hassanqureshi/vuln-web-app/releases/tag/v1.0.0
+- v0.1.0 (all vulnerabilities open): https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.0
+- v0.1.1 (dark mode + bcrypt): https://github.com/arifpucit/vuln-web-app/releases/tag/v0.1.1
+- v1.0.0 (all vulnerabilities fixed): https://github.com/arifpucit/vuln-web-app/releases/tag/v1.0.0
 
 Download the `Source code (zip)` or `Source code (tar.gz)` asset for the version you want and extract it.
 
