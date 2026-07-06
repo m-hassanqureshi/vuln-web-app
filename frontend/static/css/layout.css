@@ -1,0 +1,198 @@
+/* ============================================================
+   Layout Structures (Header, Auth, Hero, Grid Containers)
+   ============================================================ */
+
+/* Shared Header Layout */
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 70px;
+    background: var(--color-bg-header);
+    border-bottom: 1px solid var(--color-border-soft);
+    box-shadow: var(--shadow-header);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    z-index: 1000;
+}
+
+.header-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--color-text-accent);
+}
+
+.header-logos {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-logo {
+    width: 54px;
+    height: 54px;
+    object-fit: contain;
+}
+
+/* Auth Pages (Login / Signup) Layout */
+.auth-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 100vh;
+}
+
+/* Left Panel */
+.auth-left {
+    background: linear-gradient(135deg, var(--color-brand-deep) 0%, var(--color-brand-primary) 50%, var(--color-brand-tertiary) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 70px 48px 48px;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Decorative circles */
+.circle {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.circle-1 {
+    width: 300px;
+    height: 300px;
+    top: -60px;
+    right: -80px;
+}
+
+.circle-2 {
+    width: 200px;
+    height: 200px;
+    bottom: 80px;
+    left: -50px;
+}
+
+.circle-3 {
+    width: 150px;
+    height: 150px;
+    bottom: -30px;
+    right: 60px;
+}
+
+/* Right Panel */
+.auth-right {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 70px 48px 48px;
+    background: var(--color-bg-surface);
+}
+
+/* Hero Banner Layout */
+.hero-banner {
+    background: linear-gradient(135deg, var(--color-brand-primary) 0%, var(--color-brand-secondary) 100%);
+    padding: 100px 32px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.hero-left {
+    flex: 1;
+}
+
+.hero-title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.hero-subtitle {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.hero-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.hero-username {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+}
+
+.hero-username strong {
+    color: #ffffff;
+}
+
+/* Dashboard Content Outer Wrapper */
+.dashboard-content {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px;
+}
+
+/* Static Notice Layout */
+.notice-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 48px 20px;
+}
+
+/* ============================================================
+   Responsive Design Layout Rules
+   ============================================================ */
+@media (max-width: 768px) {
+    .auth-container {
+        grid-template-columns: 1fr;
+    }
+
+    .auth-left {
+        padding: 90px 24px 40px;
+        min-height: auto;
+    }
+
+    .auth-right {
+        padding: 32px 24px;
+    }
+
+    .vuln-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .steps-container {
+        flex-direction: column;
+    }
+
+    .header-logo {
+        width: 40px;
+        height: 40px;
+    }
+
+    .hero-banner {
+        flex-direction: column;
+        text-align: center;
+        padding-top: 90px;
+    }
+
+    .hero-right {
+        flex-direction: column;
+    }
+
+    .theme-toggle {
+        width: 36px;
+        height: 36px;
+        font-size: 1rem;
+        margin-right: 8px;
+    }
+}

@@ -188,25 +188,27 @@ async def _read_body(receive) -> bytes:
 
 
 def _extract_csrf_token(scope, body: bytes) -> str | None:
-    """Parse `csrf_token` out of a urlencoded form body.
+    """Parse `csrf_token` out of headers or a urlencoded form body.
 
     Returns None for any of: wrong content-type, non-UTF-8 body, missing
     field. Callers treat None as "reject the request".
     """
-    # ASGI headers are a list of (name_bytes, value_bytes) tuples, lower-
-    # cased. We do a linear scan rather than building a dict because there
-    # are usually only a handful of headers and the lookup happens once.
+    # First, try to extract from X-CSRF-Token header (useful for multipart or fetch uploads)
+    for name, value in scope.get("headers", []):
+        if name == b"x-csrf-token":
+            try:
+                return value.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+
     content_type = b""
     for name, value in scope.get("headers", []):
         if name == b"content-type":
             content_type = value
             break
 
-    # Only urlencoded form bodies carry the CSRF token in this lab. JSON or
-    # multipart bodies would need a different path; spec §EC-09 / §EC-10
-    # explicitly scopes CSRF to form-urlencoded POSTs.
-    # (`startswith` not `==` because the header often carries a charset
-    # suffix, e.g. "application/x-www-form-urlencoded; charset=utf-8".)
+    # Only urlencoded form bodies carry the CSRF token in the form parameters.
+    # JSON or multipart bodies must pass the token in X-CSRF-Token header.
     if not content_type.startswith(b"application/x-www-form-urlencoded"):
         return None
 

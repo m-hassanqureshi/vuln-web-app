@@ -1,372 +1,543 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        (function () {
-            try {
-                var saved = localStorage.getItem('theme');
-                if (saved !== 'light' && saved !== 'dark') {
-                    saved = null;
+{{partial:header}}
+
+<!-- Hero Banner -->
+<section class="hero-banner">
+    <div class="hero-left">
+        <h1 class="hero-title">My Profile</h1>
+        <p class="hero-subtitle">View your account and manage your password</p>
+    </div>
+    <div class="hero-right">
+        <a href="/welcome" class="btn btn-logout">Dashboard</a>
+        <a href="/logout" class="btn btn-logout">Logout</a>
+    </div>
+</section>
+
+<!-- Content Area -->
+<main class="dashboard-content profile-content">
+    <!-- Account Information -->
+    <div class="profile-card" style="position: relative;">
+        <h2 class="section-title">Account Information</h2>
+
+        <div class="profile-avatar-container"
+            style="text-align: center; margin-bottom: 24px; display: flex; flex-direction: column; align-items: center;">
+            <div class="profile-avatar-wrapper"
+                style="width: 120px; height: 120px; border-radius: 50%; overflow: hidden; border: 3px solid var(--color-border-soft); background: var(--color-bg-input); display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
+                <img id="avatar-preview" src="" alt="Profile Avatar"
+                    style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                <svg id="avatar-placeholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round"
+                    style="width: 50px; height: 50px; color: var(--color-text-muted);">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+            </div>
+
+            <form id="avatar-form">
+                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+                <label for="avatar-input" class="btn btn-logout"
+                    style="cursor: pointer; padding: 6px 14px; font-size: 0.8rem; border-radius: 6px; display: inline-block;">
+                    Upload Photo
+                </label>
+                <input type="file" id="avatar-input" name="avatar" accept="image/png, image/jpeg, image/gif"
+                    style="display: none;">
+            </form>
+        </div>
+
+        <div class="profile-field">
+            <span class="profile-field-label">Username</span>
+            <span class="profile-field-value">{{username}}</span>
+        </div>
+        <div class="profile-field">
+            <span class="profile-field-label">Email</span>
+            <span class="profile-field-value">{{email}}</span>
+        </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="profile-card">
+        <h2 class="section-title">Change Password</h2>
+        <form id="change-password-form">
+            <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            <div class="form-group">
+                <label class="form-label" for="current_password">Current Password</label>
+                <input type="password" id="current_password" name="current_password" class="form-input"
+                    placeholder="Enter your current password" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="new_password">New Password</label>
+                <input type="password" id="new_password" name="new_password" class="form-input"
+                    placeholder="Enter a new password" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="confirm_new_password">Confirm New Password</label>
+                <input type="password" id="confirm_new_password" class="form-input"
+                    placeholder="Re-enter the new password" required>
+            </div>
+            <div id="profile-message" class="profile-message" role="status" aria-live="polite" style="display: none;">
+            </div>
+            <button type="submit" class="btn btn-primary">Update Password</button>
+        </form>
+    </div>
+
+    <!-- Two-Factor Authentication (Email OTP 2FA, v1.0.6) -->
+    <div class="profile-card">
+        <h2 class="section-title">Two-Factor Authentication</h2>
+        <p class="notice-text" id="twofa-status">Email OTP two-factor authentication is currently <strong
+                id="twofa-state">…</strong>.</p>
+        <p class="form-subtitle">When enabled, signing in requires a 6-digit code emailed to you after your password.
+        </p>
+        <div id="twofa-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
+        <form id="twofa-form">
+            <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            <input type="hidden" name="enable" id="twofa-enable-field" value="">
+            <button type="submit" class="btn btn-primary" id="twofa-btn">…</button>
+        </form>
+    </div>
+
+    <!-- Authenticator App (TOTP, v1.0.7) -->
+    <div class="profile-card">
+        <h2 class="section-title">Authenticator App (TOTP)</h2>
+        <p class="notice-text" id="totp-status">Authenticator-app two-factor authentication is currently <strong
+                id="totp-state">…</strong>.</p>
+        <p class="form-subtitle">Scan the QR with Google Authenticator, Authy, or a similar app, then confirm a code. No
+            email needed.</p>
+        <div id="totp-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
+
+        <!-- Enrollment block: revealed after Set up; shows the QR + manual key
+             and a confirm-code input. The QR is a server-generated PNG data
+             URI (no user input); the secret is the user's own. -->
+        <div id="totp-enroll" style="display: none;">
+            <img id="totp-qr" alt="Authenticator QR code" style="max-width: 200px; margin: 12px 0;">
+            <p class="form-subtitle">Can't scan? Enter this key manually: <code id="totp-secret"></code></p>
+            <form id="totp-confirm-form">
+                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+                <div class="form-group">
+                    <label class="form-label" for="totp-code">Enter the 6-digit code from the app</label>
+                    <input type="text" id="totp-code" name="code" class="form-input" inputmode="numeric" maxlength="6"
+                        pattern="[0-9]*" placeholder="123456">
+                </div>
+                <button type="submit" class="btn btn-primary">Confirm &amp; enable</button>
+            </form>
+        </div>
+
+        <form id="totp-toggle-form">
+            <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            <button type="submit" class="btn btn-primary" id="totp-btn">…</button>
+        </form>
+    </div>
+
+    <!-- Active Sessions (Database-Backed Sessions feature) -->
+    <div class="profile-card">
+        <h2 class="section-title">Active Sessions</h2>
+        <p class="form-subtitle">These are the browsers and devices currently logged into your account. You can revoke
+            access for any session below.</p>
+
+        <div id="sessions-list" style="margin: 20px 0;">
+            <!-- Rendered dynamically by script -->
+        </div>
+
+        <form id="revoke-all-form" style="margin-top: 16px;">
+            <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            <button type="submit" id="revoke-all-btn" class="btn btn-logout"
+                style="width: auto; background-color: var(--color-error); border-color: var(--color-error); display: none;">
+                Revoke All Other Sessions
+            </button>
+        </form>
+    </div>
+</main>
+
+<script>
+    const form = document.getElementById('change-password-form');
+    const msg = document.getElementById('profile-message');
+
+    function show(text, ok) {
+        msg.textContent = text;
+        msg.classList.remove('is-error', 'is-success');
+        msg.classList.add(ok ? 'is-success' : 'is-error');
+        msg.style.display = 'block';
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPw = document.getElementById('new_password').value;
+        const confirmPw = document.getElementById('confirm_new_password').value;
+
+        if (newPw !== confirmPw) {
+            show('New passwords do not match', false);
+            return;
+        }
+
+        // Enforce the same strength policy the signup page advertises
+        // (length >= 8 plus lower/upper/digit/special). The strength meter
+        // UI is intentionally NOT shown here, but the rules still apply;
+        // the server runs the identical check as the authoritative gate.
+        const policy = [
+            { test: function (v) { return v.length >= 8; }, label: 'at least 8 characters' },
+            { test: function (v) { return /[a-z]/.test(v); }, label: 'a lowercase letter' },
+            { test: function (v) { return /[A-Z]/.test(v); }, label: 'an uppercase letter' },
+            { test: function (v) { return /[0-9]/.test(v); }, label: 'a digit' },
+            { test: function (v) { return /[^A-Za-z0-9]/.test(v); }, label: 'a special character' }
+        ];
+        const unmet = policy.filter(function (r) { return !r.test(newPw); })
+            .map(function (r) { return r.label; });
+        if (unmet.length) {
+            show('New password must include: ' + unmet.join(', '), false);
+            return;
+        }
+
+        // Send as application/x-www-form-urlencoded (NOT multipart). The
+        // CSRF middleware only parses urlencoded bodies, so wrapping the
+        // FormData in URLSearchParams makes the browser set the matching
+        // Content-Type and the csrf_token field is validated correctly.
+        const body = new URLSearchParams(new FormData(form));
+        try {
+            const response = await fetch('/profile/password', { method: 'POST', body: body });
+            const data = await response.json();
+            if (data.success) {
+                show(data.message || 'Password updated successfully', true);
+                form.reset();
+                // UI/UX polish (Phase B): the inline #profile-message banner
+                // stays as page-anchored feedback; the toast adds a
+                // transient, non-blocking confirmation on top so the user
+                // sees the success in the corner even after dismissing the
+                // form. data.error is the failure-shape key.
+                if (window.toast && data.message) {
+                    toast.success(data.message);
                 }
-                var theme = saved;
-                if (!theme && window.matchMedia) {
-                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-                }
-                if (!theme) {
-                    theme = 'light';
-                }
-                document.documentElement.setAttribute('data-theme', theme);
-            } catch (e) {
-                document.documentElement.setAttribute('data-theme', 'light');
+            } else {
+                show(data.error || 'Could not update password', false);
             }
-        })();
-    </script>
-    <title>Profile - Security Vulnerability Lab</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
-</head>
-<body class="dashboard-body">
-    <!-- Shared Header -->
-    <header class="header">
-        <div class="header-title">Security Vulnerability Lab</div>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
-            <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
-        </button>
-        <div class="header-logos">
-            <img src="/static/images/PUCIT_Logo.png" alt="PUCIT" class="header-logo">
-            <img src="/static/images/excaliat-logo.png" alt="Excaliat" class="header-logo">
-            <img src="/static/images/blue-logo-scl2.png" alt="FCCU" class="header-logo">
-        </div>
-    </header>
+        } catch (err) {
+            show('Something went wrong. Please try again.', false);
+        }
+    });
+</script>
 
-    <!-- Hero Banner -->
-    <section class="hero-banner">
-        <div class="hero-left">
-            <h1 class="hero-title">My Profile</h1>
-            <p class="hero-subtitle">View your account and manage your password</p>
-        </div>
-        <div class="hero-right">
-            <a href="/welcome" class="btn btn-logout">Dashboard</a>
-            <a href="/logout" class="btn btn-logout">Logout</a>
-        </div>
-    </section>
+<script>
+    // Two-Factor Authentication toggle (Email OTP 2FA, v1.0.6). The initial
+    // state comes from server-spliced "0"/"1" flags (not user input); the
+    // toggle POSTs urlencoded with the hidden csrf_token, like the change-
+    // password form. Session-gated server-side (no password re-prompt).
+    (function () {
+        var enabled = '{{twofa_enabled}}' === '1';
+        var emailOk = '{{email_configured}}' === '1';
+        var btn = document.getElementById('twofa-btn');
+        var state = document.getElementById('twofa-state');
+        var field = document.getElementById('twofa-enable-field');
+        var form = document.getElementById('twofa-form');
+        var msg = document.getElementById('twofa-message');
 
-    <!-- Content Area -->
-    <main class="dashboard-content profile-content">
-        <!-- Account Information -->
-        <div class="profile-card">
-            <h2 class="section-title">Account Information</h2>
-            <div class="profile-field">
-                <span class="profile-field-label">Username</span>
-                <span class="profile-field-value">{{username}}</span>
-            </div>
-            <div class="profile-field">
-                <span class="profile-field-label">Email</span>
-                <span class="profile-field-value">{{email}}</span>
-            </div>
-        </div>
+        function render() {
+            state.textContent = enabled ? 'enabled' : 'disabled';
+            if (!emailOk && !enabled) {
+                // Can't enable without SMTP — the OTP could never be delivered.
+                btn.textContent = 'Enable (requires email setup)';
+                btn.disabled = true;
+            } else {
+                btn.disabled = false;
+                btn.textContent = enabled ? 'Disable 2FA' : 'Enable 2FA';
+            }
+            // The hidden field carries the DESIRED next state for the POST.
+            field.value = enabled ? '0' : '1';
+        }
+        render();
 
-        <!-- Change Password -->
-        <div class="profile-card">
-            <h2 class="section-title">Change Password</h2>
-            <form id="change-password-form">
-                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
-                <div class="form-group">
-                    <label class="form-label" for="current_password">Current Password</label>
-                    <input type="password" id="current_password" name="current_password" class="form-input" placeholder="Enter your current password" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="new_password">New Password</label>
-                    <input type="password" id="new_password" name="new_password" class="form-input" placeholder="Enter a new password" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" for="confirm_new_password">Confirm New Password</label>
-                    <input type="password" id="confirm_new_password" class="form-input" placeholder="Re-enter the new password" required>
-                </div>
-                <div id="profile-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
-                <button type="submit" class="btn btn-primary">Update Password</button>
-            </form>
-        </div>
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            msg.style.display = 'none';
+            msg.classList.remove('is-error', 'is-success');
+            var body = new URLSearchParams(new FormData(form));
+            try {
+                var res = await fetch('/profile/2fa', { method: 'POST', body: body });
+                var data = await res.json();
+                if (data.success) {
+                    enabled = data.two_factor_enabled;
+                    msg.textContent = data.message;
+                    msg.classList.add('is-success');
+                    if (window.toast && data.message) toast.success(data.message);
+                } else {
+                    msg.textContent = data.error || 'Could not update 2FA.';
+                    msg.classList.add('is-error');
+                }
+            } catch (err) {
+                msg.textContent = 'Something went wrong. Please try again.';
+                msg.classList.add('is-error');
+            }
+            msg.style.display = 'block';
+            render();
+        });
+    })();
+</script>
 
-        <!-- Two-Factor Authentication (Email OTP 2FA, v1.0.6) -->
-        <div class="profile-card">
-            <h2 class="section-title">Two-Factor Authentication</h2>
-            <p class="notice-text" id="twofa-status">Email OTP two-factor authentication is currently <strong id="twofa-state">…</strong>.</p>
-            <p class="form-subtitle">When enabled, signing in requires a 6-digit code emailed to you after your password.</p>
-            <div id="twofa-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
-            <form id="twofa-form">
-                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
-                <input type="hidden" name="enable" id="twofa-enable-field" value="">
-                <button type="submit" class="btn btn-primary" id="twofa-btn">…</button>
-            </form>
-        </div>
+<script>
+    // Authenticator App (TOTP) card (v1.0.7). Independent of the Email-OTP
+    // card above; at login TOTP takes precedence. The initial state comes from
+    // a server-spliced "0"/"1" flag (not user input). All POSTs go urlencoded
+    // with the hidden csrf_token (same pattern as the change-password form).
+    (function () {
+        var enabled = '{{totp_enabled}}' === '1';
+        var state = document.getElementById('totp-state');
+        var btn = document.getElementById('totp-btn');
+        var toggleForm = document.getElementById('totp-toggle-form');
+        var enroll = document.getElementById('totp-enroll');
+        var qrImg = document.getElementById('totp-qr');
+        var secretEl = document.getElementById('totp-secret');
+        var confirmForm = document.getElementById('totp-confirm-form');
+        var msg = document.getElementById('totp-message');
 
-        <!-- Authenticator App (TOTP, v1.0.7) -->
-        <div class="profile-card">
-            <h2 class="section-title">Authenticator App (TOTP)</h2>
-            <p class="notice-text" id="totp-status">Authenticator-app two-factor authentication is currently <strong id="totp-state">…</strong>.</p>
-            <p class="form-subtitle">Scan the QR with Google Authenticator, Authy, or a similar app, then confirm a code. No email needed.</p>
-            <div id="totp-message" class="profile-message" role="status" aria-live="polite" style="display: none;"></div>
-
-            <!-- Enrollment block: revealed after Set up; shows the QR + manual key
-                 and a confirm-code input. The QR is a server-generated PNG data
-                 URI (no user input); the secret is the user's own. -->
-            <div id="totp-enroll" style="display: none;">
-                <img id="totp-qr" alt="Authenticator QR code" style="max-width: 200px; margin: 12px 0;">
-                <p class="form-subtitle">Can't scan? Enter this key manually: <code id="totp-secret"></code></p>
-                <form id="totp-confirm-form">
-                    <input type="hidden" name="csrf_token" value="{{csrf_token}}">
-                    <div class="form-group">
-                        <label class="form-label" for="totp-code">Enter the 6-digit code from the app</label>
-                        <input type="text" id="totp-code" name="code" class="form-input"
-                               inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="123456">
-                    </div>
-                    <button type="submit" class="btn btn-primary">Confirm &amp; enable</button>
-                </form>
-            </div>
-
-            <form id="totp-toggle-form">
-                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
-                <button type="submit" class="btn btn-primary" id="totp-btn">…</button>
-            </form>
-        </div>
-    </main>
-
-    <script>
-        const form = document.getElementById('change-password-form');
-        const msg = document.getElementById('profile-message');
-
-        function show(text, ok) {
+        function notify(text, ok) {
             msg.textContent = text;
             msg.classList.remove('is-error', 'is-success');
             msg.classList.add(ok ? 'is-success' : 'is-error');
             msg.style.display = 'block';
         }
 
-        form.addEventListener('submit', async (e) => {
+        function render() {
+            state.textContent = enabled ? 'enabled' : 'disabled';
+            btn.textContent = enabled ? 'Disable 2FA' : 'Set up authenticator';
+        }
+        render();
+
+        // Toggle button: enabled -> disable; disabled -> start setup (reveal QR).
+        toggleForm.addEventListener('submit', async function (e) {
             e.preventDefault();
-            const newPw = document.getElementById('new_password').value;
-            const confirmPw = document.getElementById('confirm_new_password').value;
-
-            if (newPw !== confirmPw) {
-                show('New passwords do not match', false);
-                return;
-            }
-
-            // Enforce the same strength policy the signup page advertises
-            // (length >= 8 plus lower/upper/digit/special). The strength meter
-            // UI is intentionally NOT shown here, but the rules still apply;
-            // the server runs the identical check as the authoritative gate.
-            const policy = [
-                { test: function (v) { return v.length >= 8; },        label: 'at least 8 characters' },
-                { test: function (v) { return /[a-z]/.test(v); },      label: 'a lowercase letter' },
-                { test: function (v) { return /[A-Z]/.test(v); },      label: 'an uppercase letter' },
-                { test: function (v) { return /[0-9]/.test(v); },      label: 'a digit' },
-                { test: function (v) { return /[^A-Za-z0-9]/.test(v); }, label: 'a special character' }
-            ];
-            const unmet = policy.filter(function (r) { return !r.test(newPw); })
-                                .map(function (r) { return r.label; });
-            if (unmet.length) {
-                show('New password must include: ' + unmet.join(', '), false);
-                return;
-            }
-
-            // Send as application/x-www-form-urlencoded (NOT multipart). The
-            // CSRF middleware only parses urlencoded bodies, so wrapping the
-            // FormData in URLSearchParams makes the browser set the matching
-            // Content-Type and the csrf_token field is validated correctly.
-            const body = new URLSearchParams(new FormData(form));
+            msg.style.display = 'none';
+            var body = new URLSearchParams(new FormData(toggleForm));
             try {
-                const response = await fetch('/profile/password', { method: 'POST', body: body });
-                const data = await response.json();
-                if (data.success) {
-                    show(data.message || 'Password updated successfully', true);
-                    form.reset();
+                if (enabled) {
+                    var res = await fetch('/profile/totp/disable', { method: 'POST', body: body });
+                    var data = await res.json();
+                    if (data.success) {
+                        enabled = false;
+                        enroll.style.display = 'none';
+                        notify(data.message || 'Authenticator app disabled.', true);
+                        if (window.toast && data.message) toast.success(data.message);
+                    } else {
+                        notify(data.error || 'Could not update the setting.', false);
+                    }
+                    render();
                 } else {
-                    show(data.error || 'Could not update password', false);
+                    var res2 = await fetch('/profile/totp/setup', { method: 'POST', body: body });
+                    var data2 = await res2.json();
+                    if (data2.success) {
+                        if (data2.qr_data_uri) {
+                            qrImg.src = data2.qr_data_uri;
+                            qrImg.style.display = '';
+                        } else {
+                            // QR render failed — manual entry still works.
+                            qrImg.style.display = 'none';
+                        }
+                        secretEl.textContent = data2.secret;
+                        enroll.style.display = 'block';
+                        notify('Scan the QR (or enter the key), then confirm a code below.', true);
+                    } else {
+                        notify(data2.error || 'Could not start enrollment.', false);
+                    }
                 }
             } catch (err) {
-                show('Something went wrong. Please try again.', false);
+                notify('Something went wrong. Please try again.', false);
             }
         });
-    </script>
 
-    <script>
-        // Two-Factor Authentication toggle (Email OTP 2FA, v1.0.6). The initial
-        // state comes from server-spliced "0"/"1" flags (not user input); the
-        // toggle POSTs urlencoded with the hidden csrf_token, like the change-
-        // password form. Session-gated server-side (no password re-prompt).
-        (function () {
-            var enabled = '{{twofa_enabled}}' === '1';
-            var emailOk = '{{email_configured}}' === '1';
-            var btn = document.getElementById('twofa-btn');
-            var state = document.getElementById('twofa-state');
-            var field = document.getElementById('twofa-enable-field');
-            var form = document.getElementById('twofa-form');
-            var msg = document.getElementById('twofa-message');
-
-            function render() {
-                state.textContent = enabled ? 'enabled' : 'disabled';
-                if (!emailOk && !enabled) {
-                    // Can't enable without SMTP — the OTP could never be delivered.
-                    btn.textContent = 'Enable (requires email setup)';
-                    btn.disabled = true;
+        // Confirm code: activates TOTP on success.
+        confirmForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            msg.style.display = 'none';
+            var body = new URLSearchParams(new FormData(confirmForm));
+            try {
+                var res = await fetch('/profile/totp/confirm', { method: 'POST', body: body });
+                var data = await res.json();
+                if (data.success) {
+                    enabled = true;
+                    enroll.style.display = 'none';
+                    confirmForm.reset();
+                    notify(data.message || 'Authenticator app enabled.', true);
+                    if (window.toast && data.message) toast.success(data.message);
+                    render();
                 } else {
-                    btn.disabled = false;
-                    btn.textContent = enabled ? 'Disable 2FA' : 'Enable 2FA';
+                    notify(data.error || 'That code did not match.', false);
                 }
-                // The hidden field carries the DESIRED next state for the POST.
-                field.value = enabled ? '0' : '1';
+            } catch (err) {
+                notify('Something went wrong. Please try again.', false);
             }
-            render();
+        });
+    })();
+</script>
 
-            form.addEventListener('submit', async function (e) {
-                e.preventDefault();
-                msg.style.display = 'none';
-                msg.classList.remove('is-error', 'is-success');
-                var body = new URLSearchParams(new FormData(form));
+<script>
+    (function () {
+        var pic = "{{picture}}";
+        var preview = document.getElementById('avatar-preview');
+        var placeholder = document.getElementById('avatar-placeholder');
+        var avatarInput = document.getElementById('avatar-input');
+        var avatarForm = document.getElementById('avatar-form');
+
+        if (pic && preview && placeholder) {
+            preview.src = "/static/uploads/" + pic;
+            preview.style.display = 'block';
+            placeholder.style.display = 'none';
+        }
+
+        if (avatarInput && avatarForm) {
+            avatarInput.addEventListener('change', async function () {
+                if (!avatarInput.files || avatarInput.files.length === 0) return;
+
+                var formData = new FormData(avatarForm);
                 try {
-                    var res = await fetch('/profile/2fa', { method: 'POST', body: body });
-                    var data = await res.json();
-                    if (data.success) {
-                        enabled = data.two_factor_enabled;
-                        msg.textContent = data.message;
-                        msg.classList.add('is-success');
-                    } else {
-                        msg.textContent = data.error || 'Could not update 2FA.';
-                        msg.classList.add('is-error');
-                    }
-                } catch (err) {
-                    msg.textContent = 'Something went wrong. Please try again.';
-                    msg.classList.add('is-error');
-                }
-                msg.style.display = 'block';
-                render();
-            });
-        })();
-    </script>
-
-    <script>
-        // Authenticator App (TOTP) card (v1.0.7). Independent of the Email-OTP
-        // card above; at login TOTP takes precedence. The initial state comes from
-        // a server-spliced "0"/"1" flag (not user input). All POSTs go urlencoded
-        // with the hidden csrf_token (same pattern as the change-password form).
-        (function () {
-            var enabled = '{{totp_enabled}}' === '1';
-            var state = document.getElementById('totp-state');
-            var btn = document.getElementById('totp-btn');
-            var toggleForm = document.getElementById('totp-toggle-form');
-            var enroll = document.getElementById('totp-enroll');
-            var qrImg = document.getElementById('totp-qr');
-            var secretEl = document.getElementById('totp-secret');
-            var confirmForm = document.getElementById('totp-confirm-form');
-            var msg = document.getElementById('totp-message');
-
-            function notify(text, ok) {
-                msg.textContent = text;
-                msg.classList.remove('is-error', 'is-success');
-                msg.classList.add(ok ? 'is-success' : 'is-error');
-                msg.style.display = 'block';
-            }
-
-            function render() {
-                state.textContent = enabled ? 'enabled' : 'disabled';
-                btn.textContent = enabled ? 'Disable 2FA' : 'Set up authenticator';
-            }
-            render();
-
-            // Toggle button: enabled -> disable; disabled -> start setup (reveal QR).
-            toggleForm.addEventListener('submit', async function (e) {
-                e.preventDefault();
-                msg.style.display = 'none';
-                var body = new URLSearchParams(new FormData(toggleForm));
-                try {
-                    if (enabled) {
-                        var res = await fetch('/profile/totp/disable', { method: 'POST', body: body });
-                        var data = await res.json();
-                        if (data.success) {
-                            enabled = false;
-                            enroll.style.display = 'none';
-                            notify(data.message || 'Authenticator app disabled.', true);
-                        } else {
-                            notify(data.error || 'Could not update the setting.', false);
+                    var response = await fetch('/profile/avatar', {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'X-CSRF-Token': avatarForm.querySelector('input[name="csrf_token"]').value
                         }
-                        render();
-                    } else {
-                        var res2 = await fetch('/profile/totp/setup', { method: 'POST', body: body });
-                        var data2 = await res2.json();
-                        if (data2.success) {
-                            if (data2.qr_data_uri) {
-                                qrImg.src = data2.qr_data_uri;
-                                qrImg.style.display = '';
-                            } else {
-                                // QR render failed — manual entry still works.
-                                qrImg.style.display = 'none';
-                            }
-                            secretEl.textContent = data2.secret;
-                            enroll.style.display = 'block';
-                            notify('Scan the QR (or enter the key), then confirm a code below.', true);
-                        } else {
-                            notify(data2.error || 'Could not start enrollment.', false);
+                    });
+                    var data = await response.json();
+                    if (response.ok && data.success) {
+                        if (window.toast) toast.success(data.message);
+                        if (preview && placeholder) {
+                            preview.src = data.url;
+                            preview.style.display = 'block';
+                            placeholder.style.display = 'none';
                         }
-                    }
-                } catch (err) {
-                    notify('Something went wrong. Please try again.', false);
-                }
-            });
-
-            // Confirm code: activates TOTP on success.
-            confirmForm.addEventListener('submit', async function (e) {
-                e.preventDefault();
-                msg.style.display = 'none';
-                var body = new URLSearchParams(new FormData(confirmForm));
-                try {
-                    var res = await fetch('/profile/totp/confirm', { method: 'POST', body: body });
-                    var data = await res.json();
-                    if (data.success) {
-                        enabled = true;
-                        enroll.style.display = 'none';
-                        confirmForm.reset();
-                        notify(data.message || 'Authenticator app enabled.', true);
-                        render();
                     } else {
-                        notify(data.error || 'That code did not match.', false);
+                        if (window.toast) toast.error(data.error || 'Failed to upload profile picture.');
                     }
                 } catch (err) {
-                    notify('Something went wrong. Please try again.', false);
+                    if (window.toast) toast.error('An error occurred during upload. Please try again.');
                 }
             });
-        })();
-    </script>
+        }
+    })();
+</script>
 
-    <script>
-        (function () {
-            var toggle = document.getElementById('theme-toggle');
-            if (!toggle) return;
+<script>
+    (function () {
+        var sessions = {{ active_sessions }
+    };
+    var listContainer = document.getElementById('sessions-list');
+    var revokeAllBtn = document.getElementById('revoke-all-btn');
+    var revokeAllForm = document.getElementById('revoke-all-form');
+    var csrfToken = "{{csrf_token}}";
 
-            function reflect(theme) {
-                var nextAction = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
-                var icon = theme === 'dark' ? '☀' : '🌙';
-                toggle.setAttribute('aria-label', nextAction);
-                var iconEl = toggle.querySelector('.theme-toggle-icon');
-                if (iconEl) iconEl.textContent = icon;
-            }
+    if (!listContainer) return;
 
-            reflect(document.documentElement.getAttribute('data-theme') || 'light');
+    function formatTime(timestamp) {
+        var seconds = Math.floor(Date.now() / 1000 - timestamp);
+        if (seconds < 60) return 'Active just now';
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return 'Active ' + minutes + 'm ago';
+        var hours = Math.floor(minutes / 60);
+        if (hours < 24) return 'Active ' + hours + 'h ago';
+        return new Date(timestamp * 1000).toLocaleString();
+    }
 
-            toggle.addEventListener('click', function () {
-                var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-                var next = current === 'dark' ? 'light' : 'dark';
-                document.documentElement.setAttribute('data-theme', next);
+    var otherSessionsCount = 0;
+
+    listContainer.innerHTML = '';
+    sessions.forEach(function (session) {
+        var isCurrent = session.is_current;
+        if (!isCurrent) otherSessionsCount++;
+
+        var item = document.createElement('div');
+        item.className = 'profile-field';
+        item.style.display = 'flex';
+        item.style.justifyContent = 'space-between';
+        item.style.alignItems = 'center';
+        item.style.padding = '12px 0';
+        item.style.borderBottom = '1px solid var(--color-border-soft)';
+
+        var infoCol = document.createElement('div');
+
+        var deviceTitle = document.createElement('div');
+        deviceTitle.style.fontWeight = '600';
+        deviceTitle.style.display = 'flex';
+        deviceTitle.style.alignItems = 'center';
+        deviceTitle.textContent = session.device_info;
+        if (isCurrent) {
+            deviceTitle.innerHTML += ' <span style="font-size: 0.7rem; font-weight: 500; background: var(--color-success); color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">Current Session</span>';
+        }
+
+        var deviceMeta = document.createElement('div');
+        deviceMeta.style.fontSize = '0.8rem';
+        deviceMeta.style.color = 'var(--color-text-muted)';
+        deviceMeta.textContent = 'IP: ' + session.ip_address + ' • ' + formatTime(session.last_activity);
+
+        infoCol.appendChild(deviceTitle);
+        infoCol.appendChild(deviceMeta);
+        item.appendChild(infoCol);
+
+        if (!isCurrent) {
+            var btnCol = document.createElement('div');
+            var revokeBtn = document.createElement('button');
+            revokeBtn.className = 'btn btn-logout';
+            revokeBtn.style.padding = '6px 12px';
+            revokeBtn.style.fontSize = '0.8rem';
+            revokeBtn.style.backgroundColor = 'var(--color-error)';
+            revokeBtn.style.borderColor = 'var(--color-error)';
+            revokeBtn.textContent = 'Revoke';
+
+            revokeBtn.addEventListener('click', async function () {
+                if (!confirm('Are you sure you want to revoke this session?')) return;
+
+                var body = new URLSearchParams();
+                body.append('csrf_token', csrfToken);
+                body.append('session_id', session.session_id);
+
                 try {
-                    localStorage.setItem('theme', next);
-                } catch (e) {
-                    /* persistence unavailable — in-page state still flips */
+                    var res = await fetch('/profile/sessions/revoke', {
+                        method: 'POST',
+                        body: body,
+                        headers: {
+                            'X-CSRF-Token': csrfToken
+                        }
+                    });
+                    var data = await res.json();
+                    if (res.ok && data.success) {
+                        if (window.toast) toast.success(data.message);
+                        setTimeout(function () { window.location.reload(); }, 1000);
+                    } else {
+                        if (window.toast) toast.error(data.error || 'Failed to revoke session.');
+                    }
+                } catch (err) {
+                    if (window.toast) toast.error('An error occurred. Please try again.');
                 }
-                reflect(next);
             });
-        })();
-    </script>
+            btnCol.appendChild(revokeBtn);
+            item.appendChild(btnCol);
+        }
+
+        listContainer.appendChild(item);
+    });
+
+    if (otherSessionsCount > 0 && revokeAllBtn) {
+        revokeAllBtn.style.display = 'inline-block';
+        revokeAllForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            if (!confirm('Are you sure you want to log out all other devices?')) return;
+
+            var body = new URLSearchParams(new FormData(revokeAllForm));
+            try {
+                var res = await fetch('/profile/sessions/revoke-all', {
+                    method: 'POST',
+                    body: body,
+                    headers: {
+                        'X-CSRF-Token': csrfToken
+                    }
+                });
+                var data = await res.json();
+                if (res.ok && data.success) {
+                    if (window.toast) toast.success(data.message);
+                    setTimeout(function () { window.location.reload(); }, 1000);
+                } else {
+                    if (window.toast) toast.error(data.error || 'Failed to revoke sessions.');
+                }
+            } catch (err) {
+                if (window.toast) toast.error('An error occurred. Please try again.');
+            }
+        });
+    }
+    }) ();
+</script>
 </body>
+
 </html>

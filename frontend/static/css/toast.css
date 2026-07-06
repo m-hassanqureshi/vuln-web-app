@@ -1,0 +1,156 @@
+/* ============================================================
+ * Toast notifications (UI/UX polish, Phase B).
+ * Top-right slide-in / auto-dismiss / hover-to-pause. Built by
+ * frontend/static/js/toast.js (window.toast.show). Uses the existing
+ * --color-success-* / --color-error-* tokens so it themes in light
+ * and dark without a parallel palette.
+ * ============================================================ */
+
+#toast-region {
+    position: fixed;
+    top: 88px;          /* below the fixed header (header height = 70px + margin) */
+    right: 24px;
+    z-index: 1100;      /* above the header (z-index 1000) and any modal-like content */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: min(360px, calc(100vw - 32px));
+    pointer-events: none; /* clicks pass through the region; only the toasts themselves capture */
+}
+
+.toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 240px;
+    padding: 12px 12px 14px 12px;
+    border: 1px solid var(--color-border-soft);
+    border-radius: 10px;
+    background: var(--color-bg-surface);
+    color: var(--color-text-primary);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    font-size: 0.88rem;
+    line-height: 1.4;
+    overflow: hidden;
+    position: relative;
+    /* Slide-in animation. translateX from off-screen-right. Disabled in
+       reduced-motion via the @media block below. */
+    animation: toast-slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.toast.is-leaving {
+    animation: toast-slide-out 200ms ease-in both;
+}
+
+.toast.is-success {
+    background: var(--color-success-bg);
+    border-color: var(--color-success-border);
+    color: var(--color-success-text);
+}
+
+.toast.is-error {
+    background: var(--color-error-bg);
+    border-color: var(--color-error-border);
+    color: var(--color-error-text);
+}
+
+.toast.is-info {
+    background: var(--color-bg-surface);
+    border-color: var(--color-border-soft);
+    color: var(--color-text-primary);
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    width: 1.2em;
+    text-align: center;
+    font-weight: 700;
+    line-height: 1.4;
+}
+
+.toast-message {
+    flex: 1;
+    word-break: break-word;
+}
+
+.toast-close {
+    flex-shrink: 0;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0 2px;
+    margin-left: 4px;
+    color: inherit;
+    opacity: 0.65;
+    cursor: pointer;
+    font: inherit;
+    line-height: 1;
+    font-size: 0.95rem;
+}
+
+.toast-close:hover {
+    opacity: 1;
+}
+
+.toast-close:focus-visible {
+    outline: 2px solid var(--color-border-input-focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* Progress bar: a thin band at the bottom of the toast. Its width
+   animates from 100% to 0% via the JS-set transition, so a CSS-only
+   hover rule can pause the visual without a JS timer dance. */
+.toast-progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 100%;
+    background: currentColor;
+    opacity: 0.45;
+}
+
+.toast:hover .toast-progress {
+    /* Freeze the visual countdown while the user is reading. The
+       underlying transition keeps its clock running, so the toast
+       will still dismiss at the original time -- this is a visual
+       pause, not a timer pause. Acceptable for a non-critical UX. */
+    animation-play-state: paused;
+    transition-play-state: paused;
+}
+
+@keyframes toast-slide-in {
+    from { transform: translateX(120%); opacity: 0; }
+    to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes toast-slide-out {
+    from { transform: translateX(0);     opacity: 1; }
+    to   { transform: translateX(120%);  opacity: 0; }
+}
+
+/* Honor the OS-level reduced-motion setting: replace the slide with a
+   simple fade and drop the progress bar. */
+@media (prefers-reduced-motion: reduce) {
+    .toast {
+        animation: toast-fade-in 150ms ease-out both;
+    }
+    .toast.is-leaving {
+        animation: toast-fade-out 150ms ease-in both;
+    }
+    .toast-progress {
+        display: none;
+    }
+}
+
+@keyframes toast-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes toast-fade-out {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}

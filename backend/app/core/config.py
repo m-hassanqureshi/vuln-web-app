@@ -97,6 +97,12 @@ EMAIL_VERIFICATION_TTL_SECONDS = int(
     os.environ.get("EMAIL_VERIFICATION_TTL_SECONDS", "3600")
 )
 
+# Password-reset token lifetime in seconds. Default 1 hour.
+PASSWORD_RESET_TTL_SECONDS = int(
+    os.environ.get("PASSWORD_RESET_TTL_SECONDS", "3600")
+)
+
+
 
 # --- SendGrid HTTP API (the only email transport) ----------------------------
 # Email is delivered exclusively over SendGrid's HTTPS API (port 443) via stdlib

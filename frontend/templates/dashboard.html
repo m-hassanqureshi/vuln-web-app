@@ -1,162 +1,105 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        (function () {
-            try {
-                var saved = localStorage.getItem('theme');
-                if (saved !== 'light' && saved !== 'dark') {
-                    saved = null;
-                }
-                var theme = saved;
-                if (!theme && window.matchMedia) {
-                    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-                }
-                if (!theme) {
-                    theme = 'light';
-                }
-                document.documentElement.setAttribute('data-theme', theme);
-            } catch (e) {
-                document.documentElement.setAttribute('data-theme', 'light');
-            }
-        })();
-    </script>
-    <title>Dashboard - Security Vulnerability Lab</title>
-    <link rel="stylesheet" href="/static/css/styles.css">
-</head>
-<body class="dashboard-body">
-    <!-- Shared Header -->
-    <header class="header">
-        <div class="header-title">Security Vulnerability Lab</div>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch to dark mode">
-            <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
-        </button>
-        <div class="header-logos">
-            <img src="/static/images/PUCIT_Logo.png" alt="PUCIT" class="header-logo">
-            <img src="/static/images/excaliat-logo.png" alt="Excaliat" class="header-logo">
-            <img src="/static/images/blue-logo-scl2.png" alt="FCCU" class="header-logo">
-        </div>
-    </header>
+{{partial:header}}
 
-    <!-- Hero Banner -->
-    <section class="hero-banner">
-        <div class="hero-left">
-            <h1 class="hero-title">Security Vulnerability Lab</h1>
-            <p class="hero-subtitle">Explore, Exploit, and Learn</p>
-        </div>
-        <div class="hero-right">
-            <span class="hero-username">Logged in as <strong>{{username}}</strong></span>
-            <a href="/profile" class="btn btn-logout">Profile</a>
-            <a href="/logout" class="btn btn-logout">Logout</a>
-        </div>
-    </section>
+<!-- Hero Banner -->
+<section class="hero-banner">
+    <div class="hero-left">
+        <h1 class="hero-title">Security Vulnerability Lab</h1>
+        <p class="hero-subtitle">Explore, Exploit, and Learn</p>
+    </div>
+    <div class="hero-right">
+        <span class="hero-username">Logged in as <strong>{{username}}</strong></span>
+        <a href="/profile" class="btn btn-logout">Profile</a>
+        <a href="/logout" class="btn btn-logout">Logout</a>
+    </div>
+</section>
 
-    <!-- Content Area -->
-    <main class="dashboard-content">
-        <!-- Mission Card -->
-        <div class="mission-card">
-            <h2 class="section-title">Our Mission</h2>
-            <p class="mission-description">This platform is designed as an educational tool for learning about common web security vulnerabilities. By exploring and exploiting these intentional flaws, you will gain practical understanding of how real attacks work and how to defend against them. All vulnerabilities are deliberately implemented for educational purposes only.</p>
-        </div>
+<!-- Content Area -->
+<main class="dashboard-content">
+    <!-- Mission Card -->
+    <div class="mission-card">
+        <h2 class="section-title">Our Mission</h2>
+        <p class="mission-description">This platform is designed as an educational tool for learning about common web
+            security vulnerabilities. By exploring and exploiting these intentional flaws, you will gain practical
+            understanding of how real attacks work and how to defend against them. All vulnerabilities are deliberately
+            implemented for educational purposes only.</p>
+    </div>
 
-        <!-- Vulnerabilities Section -->
-        <div class="vuln-section">
-            <h3 class="vuln-header">VULNERABILITIES TO DISCOVER</h3>
-            <div class="vuln-grid">
-                <div class="vuln-card">
-                    <span class="tag tag-sqli">SQLi</span>
-                    <h4 class="card-title">SQL Injection</h4>
-                    <p class="card-description">Raw SQL query construction allows authentication bypass through malicious input in login fields.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-xss">XSS</span>
-                    <h4 class="card-title">Stored XSS</h4>
-                    <p class="card-description">Malicious scripts stored in the database execute automatically when the dashboard page loads.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-xss">XSS</span>
-                    <h4 class="card-title">Reflected XSS</h4>
-                    <p class="card-description">User input reflected in search results without escaping allows one-time script execution.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-session">Session</span>
-                    <h4 class="card-title">Session Hijacking</h4>
-                    <p class="card-description">Weak hardcoded secret key allows session cookie theft and reuse across browsers.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-crypto">Crypto</span>
-                    <h4 class="card-title">Weak Password Storage</h4>
-                    <p class="card-description">MD5 hashing without salt enables rainbow table attacks for password recovery.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-exposed">Exposed</span>
-                    <h4 class="card-title">Exposed Database</h4>
-                    <p class="card-description">Database file downloadable via unauthenticated endpoint exposes all user data.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-brute">Brute</span>
-                    <h4 class="card-title">No Rate Limiting</h4>
-                    <p class="card-description">Unlimited login attempts with no throttling enable automated brute force attacks.</p>
-                </div>
-                <div class="vuln-card">
-                    <span class="tag tag-csrf">CSRF</span>
-                    <h4 class="card-title">CSRF</h4>
-                    <p class="card-description">No token validation on form submissions allows cross-site request forgery attacks.</p>
-                </div>
+    <!-- Vulnerabilities Section -->
+    <div class="vuln-section">
+        <h3 class="vuln-header">VULNERABILITIES TO DISCOVER</h3>
+        <div class="vuln-grid">
+            <div class="vuln-card">
+                <span class="tag tag-sqli">SQLi</span>
+                <h4 class="card-title">SQL Injection</h4>
+                <p class="card-description">Raw SQL query construction allows authentication bypass through malicious
+                    input in login fields.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-xss">XSS</span>
+                <h4 class="card-title">Stored XSS</h4>
+                <p class="card-description">Malicious scripts stored in the database execute automatically when the
+                    dashboard page loads.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-xss">XSS</span>
+                <h4 class="card-title">Reflected XSS</h4>
+                <p class="card-description">User input reflected in search results without escaping allows one-time
+                    script execution.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-session">Session</span>
+                <h4 class="card-title">Session Hijacking</h4>
+                <p class="card-description">Weak hardcoded secret key allows session cookie theft and reuse across
+                    browsers.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-crypto">Crypto</span>
+                <h4 class="card-title">Weak Password Storage</h4>
+                <p class="card-description">MD5 hashing without salt enables rainbow table attacks for password
+                    recovery.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-exposed">Exposed</span>
+                <h4 class="card-title">Exposed Database</h4>
+                <p class="card-description">Database file downloadable via unauthenticated endpoint exposes all user
+                    data.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-brute">Brute</span>
+                <h4 class="card-title">No Rate Limiting</h4>
+                <p class="card-description">Unlimited login attempts with no throttling enable automated brute force
+                    attacks.</p>
+            </div>
+            <div class="vuln-card">
+                <span class="tag tag-csrf">CSRF</span>
+                <h4 class="card-title">CSRF</h4>
+                <p class="card-description">No token validation on form submissions allows cross-site request forgery
+                    attacks.</p>
             </div>
         </div>
+    </div>
 
-        <!-- Process Steps -->
-        <div class="steps-section">
-            <div class="steps-container">
-                <div class="step-card">
-                    <div class="step-badge">1</div>
-                    <h4 class="step-title">Find</h4>
-                    <p class="step-description">Identify vulnerabilities in the source code by reviewing each component.</p>
-                </div>
-                <div class="step-card">
-                    <div class="step-badge">2</div>
-                    <h4 class="step-title">Exploit</h4>
-                    <p class="step-description">Use real attack vectors to demonstrate the impact of each vulnerability.</p>
-                </div>
-                <div class="step-card">
-                    <div class="step-badge">3</div>
-                    <h4 class="step-title">Mitigate</h4>
-                    <p class="step-description">Implement secure coding practices to fix each vulnerability.</p>
-                </div>
+    <!-- Process Steps -->
+    <div class="steps-section">
+        <div class="steps-container">
+            <div class="step-card">
+                <div class="step-badge">1</div>
+                <h4 class="step-title">Find</h4>
+                <p class="step-description">Identify vulnerabilities in the source code by reviewing each component.</p>
+            </div>
+            <div class="step-card">
+                <div class="step-badge">2</div>
+                <h4 class="step-title">Exploit</h4>
+                <p class="step-description">Use real attack vectors to demonstrate the impact of each vulnerability.</p>
+            </div>
+            <div class="step-card">
+                <div class="step-badge">3</div>
+                <h4 class="step-title">Mitigate</h4>
+                <p class="step-description">Implement secure coding practices to fix each vulnerability.</p>
             </div>
         </div>
-    </main>
-
-    <script>
-        (function () {
-            var toggle = document.getElementById('theme-toggle');
-            if (!toggle) return;
-
-            function reflect(theme) {
-                var nextAction = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
-                var icon = theme === 'dark' ? '☀' : '🌙';
-                toggle.setAttribute('aria-label', nextAction);
-                var iconEl = toggle.querySelector('.theme-toggle-icon');
-                if (iconEl) iconEl.textContent = icon;
-            }
-
-            reflect(document.documentElement.getAttribute('data-theme') || 'light');
-
-            toggle.addEventListener('click', function () {
-                var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-                var next = current === 'dark' ? 'light' : 'dark';
-                document.documentElement.setAttribute('data-theme', next);
-                try {
-                    localStorage.setItem('theme', next);
-                } catch (e) {
-                    /* persistence unavailable — in-page state still flips */
-                }
-                reflect(next);
-            });
-        })();
-    </script>
+    </div>
+</main>
 </body>
+
 </html>

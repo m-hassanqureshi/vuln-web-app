@@ -1,0 +1,204 @@
+/* ============================================================
+   Page-Specific Selector Styles
+   ============================================================ */
+
+/* --- Auth Pages Specifics (Login / Signup) --- */
+.welcome-heading {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 16px;
+    line-height: 1.2;
+}
+
+.auth-description {
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 24px;
+    line-height: 1.7;
+}
+
+.auth-features {
+    list-style: none;
+    padding: 0;
+}
+
+.auth-features li {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.9rem;
+    padding: 6px 0;
+    padding-left: 20px;
+    position: relative;
+}
+
+.auth-features li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #c5cae9;
+    font-weight: 700;
+}
+
+.form-title {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: 8px;
+}
+
+.form-subtitle {
+    font-size: 0.9rem;
+    color: var(--color-text-muted);
+    margin-bottom: 28px;
+}
+
+.form-link {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+    margin-top: 20px;
+}
+
+.form-link a {
+    color: var(--color-text-accent);
+    font-weight: 600;
+}
+
+/* --- Dashboard Page Specifics --- */
+.dashboard-body {
+    background: var(--color-bg-dashboard);
+}
+
+.mission-card {
+    background: var(--color-bg-surface);
+    border-radius: 12px;
+    padding: 32px;
+    margin-bottom: 32px;
+    border: 1px solid var(--color-border-soft);
+}
+
+.section-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin-bottom: 12px;
+}
+
+.mission-description {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    line-height: 1.7;
+}
+
+/* Vulnerabilities Grid */
+.vuln-section {
+    margin-bottom: 32px;
+}
+
+.vuln-header {
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--color-text-muted);
+    margin-bottom: 16px;
+}
+
+.vuln-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.vuln-card {
+    background: var(--color-bg-surface);
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid var(--color-border-soft);
+    transition: box-shadow 0.2s;
+}
+
+.vuln-card:hover {
+    box-shadow: var(--shadow-card-hover);
+}
+
+.card-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 10px 0 6px;
+}
+
+.card-description {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+}
+
+/* Steps section */
+.steps-section {
+    margin-top: 8px;
+}
+
+.steps-container {
+    display: flex;
+    gap: 16px;
+}
+
+/* --- User Profile Page Specifics --- */
+.profile-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.profile-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.profile-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-border-soft);
+}
+
+.profile-field:last-child {
+    border-bottom: none;
+}
+
+.profile-field-label {
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+
+.profile-field-value {
+    color: var(--color-text-primary);
+    word-break: break-all;
+}
+
+/* --- Static & Setup Notice Pages --- */
+.notice-text {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 12px 0;
+    text-align: left;
+}
+
+/* --- QR Panel --- */
+.qr-panel {
+    margin-top: 24px;
+    text-align: center;
+}
+
+.qr-panel #qr-image {
+    max-width: 200px;
+    margin: 12px auto;
+    display: block;
+}

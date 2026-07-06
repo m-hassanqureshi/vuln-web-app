@@ -31,7 +31,7 @@ import os
 import html
 import logging
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
 from app.core.csrf import get_or_create_csrf_token
@@ -44,7 +44,11 @@ from app.services import oauth_service
 from app.services import verification_service
 from app.services import otp_service
 from app.services import totp_service
+from app.services import password_reset_service
+from app.services import avatar_service
+from app.services import session_service
 from app.db.session import get_db
+from app.core import audit_logger
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +68,39 @@ def _load_template(name: str) -> str:
     factored out so the new routes that just render a static page (and the
     email-not-configured gate used in two places) stay one-liners.
     """
-    with open(os.path.join(TEMPLATE_DIR, name), "r") as f:
+    with open(os.path.join(TEMPLATE_DIR, name), "r", encoding="utf-8") as f:
         return f.read()
+
+
+
+def _render_page(name: str, replacements: dict[str, str]) -> str:
+    """Load a page template and splice in shared partials + caller tokens.
+
+    UI/UX polish: every page shares the same theme-init <script>, <header>,
+    and theme-toggle IIFE. Centralizing that in `frontend/templates/_header.html`
+    removes ~12x duplication. This helper is the server-side equivalent: it
+    reads the page template, reads the shared header partial once, splices the
+    partial into the page wherever `{{partial:header}}` appears, then applies
+    the caller-supplied token replacements (csrf_token, title, body_attrs,
+    turnstile_*, username, email, token, valid, twofa_enabled, etc.).
+
+    Pure string substitution -- no SQL, no auth, no middleware. The XSS posture
+    is unchanged: every attacker-controllable replacement (csrf_token, username,
+    email, token, title, message) is still HTML-escaped by the caller before
+    being placed in the dict, exactly as it was when the route did its own
+    str.replace() calls.
+    """
+    page = _load_template(name)
+    # Splice the shared header partial once per render. The partial is loaded
+    # from disk and embedded as a literal string, so its own {{csrf_token}}
+    # placeholder is a *server-time* splice, not a client-side reflection
+    # (same posture as every other VULN-2/3 splice in this module).
+    header = _load_template("_header.html")
+    page = page.replace("{{partial:header}}", header)
+    # Then apply all caller-supplied tokens.
+    for token, value in replacements.items():
+        page = page.replace(token, value)
+    return page
 
 
 @router.get("/")
@@ -89,10 +124,15 @@ async def signup_page(request: Request):
     can't succeed -- mirrors the Continue-with-Google "not configured" degrade.
     """
     if not config.is_email_configured():
-        return HTMLResponse(content=_load_template("email_not_configured.html"))
+        page = _render_page(
+            "email_not_configured.html",
+            {
+                "{{title}}": "Email Verification Not Configured - Security Vulnerability Lab",
+                "{{body_attrs}}": "",
+            },
+        )
+        return HTMLResponse(content=page)
 
-    with open(os.path.join(TEMPLATE_DIR, "signup.html"), "r") as f:
-        page = f.read()
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     # get_or_create_csrf_token() is idempotent: it returns the existing
     # token if one is already in the session, or generates one if not.
@@ -100,12 +140,20 @@ async def signup_page(request: Request):
     # contains no HTML-significant characters today, but escaping keeps the
     # splice safe under future token-format changes.
     token = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+    page = _render_page(
+        "signup.html",
+        {
+            "{{title}}": "Sign Up - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(token, quote=True),
+        },
+    )
     return HTMLResponse(content=page)
 
 
 @router.post("/signup")
 async def signup_post(
+    request: Request,
     username: str = Form(""),
     email: str = Form(""),
     password: str = Form(""),
@@ -125,9 +173,16 @@ async def signup_post(
     gated GET /signup page -- same not-configured page, no row inserted.
     """
     if not config.is_email_configured():
-        return HTMLResponse(content=_load_template("email_not_configured.html"))
+        page = _render_page(
+            "email_not_configured.html",
+            {
+                "{{title}}": "Email Verification Not Configured - Security Vulnerability Lab",
+                "{{body_attrs}}": "",
+            },
+        )
+        return HTMLResponse(content=page)
 
-    return auth_service.signup(username, email, password)
+    return auth_service.signup(username, email, password, request)
 
 
 @router.get("/check-email")
@@ -138,7 +193,14 @@ async def check_email_page():
     the address), so there is no sink to escape. Loaded fresh from disk like
     every other template.
     """
-    return HTMLResponse(content=_load_template("check_email.html"))
+    page = _render_page(
+        "check_email.html",
+        {
+            "{{title}}": "Check Your Inbox - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+        },
+    )
+    return HTMLResponse(content=page)
 
 
 @router.get("/verify")
@@ -153,7 +215,7 @@ async def verify_email(request: Request):
     correctly ignore it.
     """
     token = request.query_params.get("token", "")
-    result = verification_service.verify_email_token(token)
+    result = verification_service.verify_email_token(token, request)
 
     # On success, log the user straight in (clicking the emailed link proves
     # control of the address) by writing the SAME session keys as
@@ -161,9 +223,7 @@ async def verify_email(request: Request):
     # what makes SessionMiddleware emit the signed Set-Cookie.
     if result["status"] == "ok":
         user = result["user"]
-        request.session["user_id"] = user["id"]
-        request.session["username"] = user["username"]
-        request.session["email"] = user["email"]
+        session_service.establish_session(request, user["id"], user["username"], user["email"])
         return RedirectResponse(url="/welcome", status_code=302)
 
     # Expired / invalid: render a fixed, HTML-escaped outcome message. These
@@ -183,18 +243,25 @@ async def verify_email(request: Request):
     }
     title, message = outcomes.get(result["status"], outcomes["invalid"])
 
-    page = _load_template("verify_result.html")
-    page = page.replace("{{title}}", html.escape(title, quote=True))
-    page = page.replace("{{message}}", html.escape(message, quote=True))
+    page = _render_page(
+        "verify_result.html",
+        {
+            "{{title}}": "Email Verification - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{title_msg}}": html.escape(title, quote=True),
+            "{{message}}": html.escape(message, quote=True),
+        },
+    )
     return HTMLResponse(content=page)
 
 
 @router.post("/verify/resend")
 async def verify_resend(
+    request: Request,
     username: str = Form(""),
     password: str = Form(""),
 ):
-    """Re-send the verification email, gated on valid credentials.
+    """Re-issue + re-send the verification email, gated on valid credentials.
 
     Login is blocked until verification, so an unverified user has no session
     to gate on. The login page calls this with the username + password the user
@@ -212,30 +279,34 @@ async def login_page(request: Request):
     """Render the login HTML form with a per-session CSRF token spliced in.
 
     Same pattern as signup_page(): load template, issue/read token,
-    splice via str.replace.
+    splice via _render_page (which embeds the shared header partial).
     """
-    with open(os.path.join(TEMPLATE_DIR, "login.html"), "r") as f:
-        page = f.read()
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     token = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
     # CAPTCHA on Login (v2.0.0): render the Cloudflare Turnstile widget + script
     # only when both keys are configured; otherwise both placeholders collapse to
     # "" and the login page is byte-for-byte the pre-CAPTCHA page (graceful degrade).
     if config.is_captcha_configured():
-        head = (
+        turnstile_head = (
             '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"'
             " async defer></script>"
         )
-        widget = (
+        turnstile_widget = (
             '<div class="cf-turnstile" data-sitekey="'
             + html.escape(config.TURNSTILE_SITE_KEY, quote=True)
             + '"></div>'
         )
     else:
-        head = widget = ""
-    page = page.replace("{{turnstile_head}}", head).replace(
-        "{{turnstile_widget}}", widget
+        turnstile_head = turnstile_widget = ""
+    page = _render_page(
+        "login.html",
+        {
+            "{{csrf_token}}": html.escape(token, quote=True),
+            "{{title}}": "Login - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{turnstile_head}}": turnstile_head,
+            "{{turnstile_widget}}": turnstile_widget,
+        },
     )
     return HTMLResponse(content=page)
 
@@ -343,9 +414,6 @@ async def welcome_page(request: Request):
     # dashboard needs no verification check or banner.
     username = request.session.get("username", "")
 
-    with open(os.path.join(TEMPLATE_DIR, "dashboard.html"), "r") as f:
-        page = f.read()
-
     # FIXED: Stored XSS closed -- username escaped before substitution.
     # The raw value remains in the session/database (output-encoding fix, not input filtering).
     #
@@ -353,8 +421,24 @@ async def welcome_page(request: Request):
     # we do NOT sanitize on the way in (that would lose information and
     # is famously fragile). Instead we escape on the way out, so the
     # rendered HTML treats the username as text, never as markup.
-    safe_username = html.escape(username, quote=True)
-    page = page.replace("{{username}}", safe_username)
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT role FROM users WHERE id = ?", [user_id]).fetchone()
+    finally:
+        conn.close()
+    
+    is_admin = bool(user_row and user_row["role"] == "admin")
+    admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
+
+    page = _render_page(
+        "dashboard.html",
+        {
+            "{{title}}": "Dashboard - Security Vulnerability Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{username}}": html.escape(username, quote=True),
+            "{{admin_link}}": admin_link_html,
+        },
+    )
 
     return HTMLResponse(content=page)
 
@@ -376,36 +460,50 @@ async def profile_page(request: Request):
 
     # 2FA cards (Email OTP v1.0.6 + Authenticator-App TOTP v1.0.7): the session
     # does not carry either flag, so read both for the cards' initial state
-    # (parameterized SELECT -- VULN-1).
+    # (parameterized SELECT -- VULN-1). Also SELECT picture and role.
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT two_factor_enabled, totp_enabled FROM users WHERE id = ?",
+            "SELECT two_factor_enabled, totp_enabled, picture, role FROM users WHERE id = ?",
             [user_id],
         ).fetchone()
     finally:
         conn.close()
     twofa_enabled = bool(row["two_factor_enabled"]) if row else False
     totp_enabled = bool(row["totp_enabled"]) if row else False
+    picture = row["picture"] if row and row["picture"] else ""
+    is_admin = bool(row and row["role"] == "admin")
+    admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
 
-    with open(os.path.join(TEMPLATE_DIR, "profile.html"), "r") as f:
-        page = f.read()
+    import json
+    active_sessions = session_service.get_active_sessions(user_id)
+    current_session_id = request.session.get("session_id")
+    for s in active_sessions:
+        s["is_current"] = (s["session_id"] == current_session_id)
+    sessions_json = json.dumps(active_sessions).replace("</script>", "<\\/script>")
 
     # FIXED: CSRF closed -- issue/splice the per-session token for the form.
     token = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
 
     # FIXED: Stored XSS closed -- escape every user-controlled value before
     # splicing (output encoding, same posture as the dashboard username).
-    page = page.replace("{{username}}", html.escape(username, quote=True))
-    page = page.replace("{{email}}", html.escape(email, quote=True))
-
-    # Server-controlled "0"/"1" flags for the 2FA cards (not user input).
-    page = page.replace("{{twofa_enabled}}", "1" if twofa_enabled else "0")
-    page = page.replace(
-        "{{email_configured}}", "1" if config.is_email_configured() else "0"
+    page = _render_page(
+        "profile.html",
+        {
+            "{{title}}": "Profile - Security Vulnerability Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{csrf_token}}": html.escape(token, quote=True),
+            "{{username}}": html.escape(username, quote=True),
+            "{{email}}": html.escape(email, quote=True),
+            # Server-controlled "0"/"1" flags for the 2FA cards (not user input).
+            "{{twofa_enabled}}": "1" if twofa_enabled else "0",
+            "{{email_configured}}": "1" if config.is_email_configured() else "0",
+            "{{totp_enabled}}": "1" if totp_enabled else "0",
+            "{{picture}}": html.escape(picture, quote=True),
+            "{{active_sessions}}": sessions_json,
+            "{{admin_link}}": admin_link_html,
+        },
     )
-    page = page.replace("{{totp_enabled}}", "1" if totp_enabled else "0")
 
     return HTMLResponse(content=page)
 
@@ -436,12 +534,116 @@ async def profile_2fa_post(request: Request, enable: str = Form("")):
         return JSONResponse(
             content={"error": "Could not update the 2FA setting."}, status_code=400
         )
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("2fa_toggle", username, ip, f"Status: {'enabled' if want_enable else 'disabled'}")
     return JSONResponse(
         content={
             "success": True,
             "two_factor_enabled": want_enable,
             "message": "Two-factor authentication "
             + ("enabled." if want_enable else "disabled."),
+        }
+    )
+
+
+@router.post("/profile/avatar")
+async def profile_avatar_post(
+    request: Request,
+    avatar: UploadFile = File(...)
+):
+    """Handle avatar profile picture upload.
+
+    Session-gated and CSRF-protected.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    try:
+        file_data = await avatar.read()
+    except Exception:
+        logger.exception("Failed to read uploaded avatar file data")
+        return JSONResponse(content={"error": "Failed to read file data."}, status_code=400)
+
+    res = avatar_service.save_avatar(
+        user_id=user_id,
+        file_data=file_data,
+        client_filename=avatar.filename or "",
+        content_type=avatar.content_type or "",
+        request=request
+    )
+
+    if res["status"] != "success":
+        return JSONResponse(content={"error": res["error"]}, status_code=400)
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Profile picture updated successfully.",
+            "url": f"/static/uploads/{res['filename']}"
+        }
+    )
+
+
+@router.post("/profile/sessions/revoke")
+async def profile_sessions_revoke_post(
+    request: Request,
+    session_id: str = Form("")
+):
+    """Revoke a specific database session for the logged-in user.
+
+    Session-gated and CSRF-protected.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    if not session_id:
+        return JSONResponse(content={"error": "Session ID is required."}, status_code=400)
+
+    ok = session_service.revoke_session(session_id, user_id)
+    if not ok:
+        return JSONResponse(content={"error": "Could not revoke the session."}, status_code=400)
+
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("session_revoke", username, ip, f"Revoked session_id: {session_id}")
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Session revoked successfully."
+        }
+    )
+
+
+@router.post("/profile/sessions/revoke-all")
+async def profile_sessions_revoke_all_post(
+    request: Request
+):
+    """Revoke all other database sessions for the logged-in user.
+
+    Session-gated and CSRF-protected.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+
+    current_session_id = request.session.get("session_id")
+    if not current_session_id:
+        return JSONResponse(content={"error": "Current session not found."}, status_code=400)
+
+    ok = session_service.revoke_all_other_sessions(current_session_id, user_id)
+    if not ok:
+        return JSONResponse(content={"error": "Could not revoke other sessions."}, status_code=400)
+
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("session_revoke_all", username, ip, f"Revoked all other sessions except: {current_session_id}")
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "All other sessions revoked successfully."
         }
     )
 
@@ -457,10 +659,16 @@ async def login_otp_page(request: Request):
     """
     if not request.session.get("pending_2fa_user_id"):
         return RedirectResponse(url="/login", status_code=302)
-    page = _load_template("otp_verify.html")
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     token = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+    page = _render_page(
+        "otp_verify.html",
+        {
+            "{{title}}": "Verify Login - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(token, quote=True),
+        },
+    )
     return HTMLResponse(content=page)
 
 
@@ -487,9 +695,7 @@ async def login_otp_post(request: Request, otp: str = Form("")):
         user = result["user"]
         request.session.pop("pending_2fa_user_id", None)
         request.session.pop("pending_2fa_username", None)
-        request.session["user_id"] = user["id"]
-        request.session["username"] = user["username"]
-        request.session["email"] = user["email"]
+        session_service.establish_session(request, user["id"], user["username"], user["email"])
         return JSONResponse(content={"success": True, "redirect": "/welcome"})
 
     messages = {
@@ -610,7 +816,10 @@ async def profile_totp_confirm(request: Request, code: str = Form("")):
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
 
     result = totp_service.confirm(user_id, code)
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
     if result["status"] == "ok":
+        audit_logger.log_security_event("totp_confirm", username, ip, "success: Enabled Authenticator App")
         return JSONResponse(
             content={"success": True, "message": "Authenticator app enabled."}
         )
@@ -621,6 +830,7 @@ async def profile_totp_confirm(request: Request, code: str = Form("")):
         ),
         "no_pending": "Start setup first, then enter the code from your authenticator app.",
     }
+    audit_logger.log_security_event("totp_confirm", username, ip, f"failure: status {result['status']}")
     return JSONResponse(
         content={"error": messages.get(result["status"], messages["invalid"])},
         status_code=400,
@@ -642,6 +852,9 @@ async def profile_totp_disable(request: Request):
         return JSONResponse(
             content={"error": "Could not update the setting."}, status_code=400
         )
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("totp_disable", username, ip, "success: Disabled Authenticator App")
     return JSONResponse(
         content={"success": True, "message": "Authenticator app disabled."}
     )
@@ -662,10 +875,16 @@ async def login_totp_page(request: Request):
         or request.session.get("pending_2fa_method") != "totp"
     ):
         return RedirectResponse(url="/login", status_code=302)
-    page = _load_template("totp_verify.html")
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     token = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(token, quote=True))
+    page = _render_page(
+        "totp_verify.html",
+        {
+            "{{title}}": "Verify Login - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(token, quote=True),
+        },
+    )
     return HTMLResponse(content=page)
 
 
@@ -688,20 +907,22 @@ async def login_totp_post(request: Request, code: str = Form("")):
         )
 
     result = totp_service.verify(user_id, code)
+    ip = request.client.host if request and request.client else ""
     if result["status"] == "ok":
         user = result["user"]
         request.session.pop("pending_2fa_user_id", None)
         request.session.pop("pending_2fa_username", None)
         request.session.pop("pending_2fa_method", None)
-        request.session["user_id"] = user["id"]
-        request.session["username"] = user["username"]
-        request.session["email"] = user["email"]
+        session_service.establish_session(request, user["id"], user["username"], user["email"])
+        audit_logger.log_auth_event("login_totp", user["username"], ip, "success")
         return JSONResponse(content={"success": True, "redirect": "/welcome"})
 
     messages = {
         "invalid": "Incorrect code. Open your authenticator app and try again.",
         "no_challenge": "No active authenticator challenge. Please sign in again.",
     }
+    username = request.session.get("pending_2fa_username", "unknown")
+    audit_logger.log_auth_event("login_totp", username, ip, f"failure: {result['status']}")
     return JSONResponse(
         content={"error": messages.get(result["status"], messages["invalid"])},
         status_code=401,
@@ -738,8 +959,14 @@ async def google_login(request: Request):
     and the password flow is unaffected.
     """
     if not config.is_google_configured():
-        with open(os.path.join(TEMPLATE_DIR, "oauth_not_configured.html"), "r") as f:
-            return HTMLResponse(content=f.read())
+        page = _render_page(
+            "oauth_not_configured.html",
+            {
+                "{{title}}": "Google Login Not Configured - Security Vulnerability Lab",
+                "{{body_attrs}}": "",
+            },
+        )
+        return HTMLResponse(content=page)
     return await oauth.google.authorize_redirect(request, config.GOOGLE_REDIRECT_URI)
 
 
@@ -762,6 +989,8 @@ async def google_callback(request: Request):
     error = request.query_params.get("error")
     if error:
         logger.warning("Google OAuth callback returned error=%s", error)
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("oauth_login", "unknown", ip, "failure", f"Google OAuth callback returned error: {error}")
         return RedirectResponse(url="/login", status_code=302)
 
     # 2) Exchange the code + verify the ID token. authorize_access_token()
@@ -770,8 +999,10 @@ async def google_callback(request: Request):
     #    or when the session (holding `state`/`nonce`) has expired.
     try:
         token = await oauth.google.authorize_access_token(request)
-    except Exception:
+    except Exception as e:
         logger.warning("Google OAuth token exchange/verification failed", exc_info=True)
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("oauth_login", "unknown", ip, "failure", f"Google OAuth token exchange failed: {str(e)}")
         return RedirectResponse(url="/login", status_code=302)
 
     # 3) Pull the verified profile claims.
@@ -789,9 +1020,9 @@ async def google_callback(request: Request):
     # 5) Log in by writing the SAME session keys as auth_service.login(). This
     #    mutation is what makes SessionMiddleware emit the signed Set-Cookie.
     #    Existing keys (e.g. csrf_token) are preserved -- we merge, not replace.
-    request.session["user_id"] = user["id"]
-    request.session["username"] = user["username"]
-    request.session["email"] = user["email"]
+    session_service.establish_session(request, user["id"], user["username"], user["email"])
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_auth_event("oauth_login", user["username"], ip, "success", "Google OAuth")
 
     return RedirectResponse(url="/welcome", status_code=302)
 
@@ -851,9 +1082,9 @@ async def qr_status(request: Request, token: str = ""):
         if not identity:
             return JSONResponse(content={"status": "expired"})
         request.session.pop("qr_login_token", None)
-        request.session["user_id"] = identity["user_id"]
-        request.session["username"] = identity["username"]
-        request.session["email"] = identity["email"]
+        session_service.establish_session(request, identity["user_id"], identity["username"], identity["email"])
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("qr_login", identity["username"], ip, "success")
         return JSONResponse(content={"status": "approved", "redirect": "/welcome"})
     return JSONResponse(content={"status": st})
 
@@ -877,15 +1108,21 @@ async def qr_scan(request: Request, token: str):
     entry = qr_login.get(token)
     valid = bool(entry and entry["status"] == "pending")
 
-    page = _load_template("qr_approve.html")
     # FIXED: CSRF closed -- splice the per-session token into the form's hidden field.
     csrf = get_or_create_csrf_token(request)
-    page = page.replace("{{csrf_token}}", html.escape(csrf, quote=True))
     # FIXED: Stored/Reflected XSS closed -- escape every value before splicing.
-    page = page.replace("{{token}}", html.escape(token, quote=True))
-    page = page.replace("{{username}}", html.escape(username, quote=True))
-    # Server-controlled "0"/"1" flag (not user input).
-    page = page.replace("{{valid}}", "1" if valid else "0")
+    page = _render_page(
+        "qr_approve.html",
+        {
+            "{{title}}": "Approve Sign-in - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(csrf, quote=True),
+            "{{token}}": html.escape(token, quote=True),
+            "{{username}}": html.escape(username, quote=True),
+            # Server-controlled "0"/"1" flag (not user input).
+            "{{valid}}": "1" if valid else "0",
+        },
+    )
     return HTMLResponse(content=page)
 
 
@@ -901,19 +1138,23 @@ async def qr_approve_post(request: Request, token: str = Form("")):
     user_id = request.session.get("user_id")
     if not user_id:
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
     ok = qr_login.approve(
         token,
         user_id,
-        request.session.get("username", ""),
+        username,
         request.session.get("email", ""),
     )
     if ok:
+        audit_logger.log_security_event("qr_login_approve", username, ip, f"Approved token: {token}")
         return JSONResponse(
             content={
                 "success": True,
                 "message": "Login approved. Return to the other device.",
             }
         )
+    audit_logger.log_security_event("qr_login_approve", username, ip, f"failure: Token expired or used: {token}")
     return JSONResponse(
         content={"error": "This QR code has expired or was already used."},
         status_code=400,
@@ -926,8 +1167,107 @@ async def qr_reject_post(request: Request, token: str = Form("")):
     user_id = request.session.get("user_id")
     if not user_id:
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
     qr_login.reject(token)
+    audit_logger.log_security_event("qr_login_reject", username, ip, f"Rejected token: {token}")
     return JSONResponse(content={"success": True, "message": "Login request denied."})
+
+
+@router.get("/forgot-password")
+async def forgot_password_page(request: Request):
+    """Render the forgot-password email request page."""
+    # If email is not configured, show the unconfigured page
+    if not config.is_email_configured():
+        page = _render_page(
+            "email_not_configured.html",
+            {
+                "{{title}}": "Email Delivery Not Configured - Security Vulnerability Lab",
+                "{{body_attrs}}": "",
+            },
+        )
+        return HTMLResponse(content=page)
+
+    token = get_or_create_csrf_token(request)
+    page = _render_page(
+        "forgot_password.html",
+        {
+            "{{title}}": "Forgot Password - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(token, quote=True),
+        },
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/forgot-password")
+async def forgot_password_post(
+    request: Request,
+    username_or_email: str = Form(""),
+):
+    """Handle forgot-password form submission."""
+    res = password_reset_service.request_reset(username_or_email, request)
+    if res.get("status") == "email_not_configured":
+        return JSONResponse(
+            content={"error": "Email delivery is not configured."},
+            status_code=400,
+        )
+    return JSONResponse(content={"message": res["message"]})
+
+
+@router.get("/reset-password")
+async def reset_password_page(request: Request):
+    """Render the password-reset page if the token is valid."""
+    token = request.query_params.get("token", "")
+    verify_res = password_reset_service.verify_reset_token(token)
+    
+    if verify_res["status"] != "ok":
+        outcomes = {
+            "expired": (
+                "Link expired",
+                "This password reset link has expired. Please go back to the login page and request a new one.",
+            ),
+            "invalid": (
+                "Invalid link",
+                "This password reset link is invalid or has already been used.",
+            ),
+        }
+        title, message = outcomes.get(verify_res["status"], outcomes["invalid"])
+        page = _render_page(
+            "verify_result.html",
+            {
+                "{{title}}": "Password Reset - Security Vulnerability Lab",
+                "{{body_attrs}}": "",
+                "{{title_msg}}": html.escape(title, quote=True),
+                "{{message}}": html.escape(message, quote=True),
+            },
+        )
+        return HTMLResponse(content=page)
+
+    csrf = get_or_create_csrf_token(request)
+    page = _render_page(
+        "reset_password.html",
+        {
+            "{{title}}": "Reset Password - Security Vulnerability Lab",
+            "{{body_attrs}}": "",
+            "{{csrf_token}}": html.escape(csrf, quote=True),
+            "{{token}}": html.escape(token, quote=True),
+        },
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/reset-password")
+async def reset_password_post(
+    request: Request,
+    token: str = Form(""),
+    new_password: str = Form(""),
+):
+    """Handle password reset form submission."""
+    res = password_reset_service.reset_password(token, new_password, request)
+    if res["status"] != "success":
+        return JSONResponse(content={"error": res.get("error") or "Invalid or expired token"}, status_code=400)
+    return JSONResponse(content={"success": True, "message": res["message"]})
 
 
 @router.get("/logout")
@@ -939,5 +1279,298 @@ async def logout(request: Request):
     will re-issue a fresh CSRF token tied to the new session, so any
     forms cached in the browser from before logout cannot be replayed.
     """
+    user_id = request.session.get("user_id")
+    session_id = request.session.get("session_id")
+    if user_id and session_id:
+        session_service.revoke_session(session_id, user_id)
+
+    username = request.session.get("username", "")
+    ip = request.client.host if request and request.client else ""
+    if username:
+        audit_logger.log_auth_event("logout", username, ip, "success")
+
     request.session.clear()
     return RedirectResponse(url="/login", status_code=302)
+
+
+@router.get("/admin")
+async def admin_page(request: Request):
+    """Render the admin dashboard control panel."""
+    # 1. Authentication Check
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    # 2. Authorization Check (RBAC)
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [user_id]).fetchone()
+        if not user_row or user_row["role"] != "admin":
+            # Reject unauthorized attempt with 403 Forbidden
+            # Reuse verify_result.html for a clean styled access denied page
+            page = _render_page(
+                "verify_result.html",
+                {
+                    "{{title}}": "Forbidden - Security Vulnerability Lab",
+                    "{{body_attrs}}": "",
+                    "{{title_msg}}": "403 Forbidden - Access Denied",
+                    "{{message}}": "You do not have permission to access the Administrator Control Panel.",
+                }
+            )
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_security_event("admin_access_attempt", user_row["username"] if user_row else "unknown", ip, "failure: Unauthorized role")
+            return HTMLResponse(content=page, status_code=403)
+
+        admin_username = user_row["username"]
+
+        # Fetch all registered users, their roles, 2FA states, verification status, and active session count
+        users = conn.execute(
+            """SELECT u.id, u.username, u.email, u.role, u.is_verified, 
+                      u.two_factor_enabled, u.totp_enabled, u.picture,
+                      (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) as session_count
+               FROM users u"""
+        ).fetchall()
+
+        total_users = len(users)
+        total_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+
+    finally:
+        conn.close()
+
+    # Generate user rows HTML programmatically to support the custom templating architecture
+    user_rows = []
+    csrf = get_or_create_csrf_token(request)
+
+    for u in users:
+        u_id = u["id"]
+        u_username = u["username"]
+        u_email = u["email"]
+        u_role = u["role"]
+        u_is_verified = bool(u["is_verified"])
+        u_two_factor_enabled = bool(u["two_factor_enabled"])
+        u_totp_enabled = bool(u["totp_enabled"])
+        u_picture = u["picture"]
+        u_session_count = u["session_count"]
+
+        # Escaping user-controllable outputs to prevent Stored XSS
+        esc_username = html.escape(u_username, quote=True)
+        esc_email = html.escape(u_email or "", quote=True)
+        esc_role = html.escape(u_role or "user", quote=True)
+
+        # Avatar column HTML
+        avatar_html = ""
+        if u_picture:
+            esc_pic = html.escape(u_picture, quote=True)
+            avatar_html = f'<img class="admin-avatar-img" src="/static/uploads/{esc_pic}" alt="Avatar">'
+        else:
+            # Fallback SVG placeholder
+            avatar_html = (
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" '
+                'stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px; color: var(--color-text-muted);">'
+                '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>'
+                '<circle cx="12" cy="7" r="4"></circle>'
+                '</svg>'
+            )
+
+        # Role Badge HTML
+        role_badge_class = "badge-admin" if u_role == "admin" else "badge-user"
+        role_html = f'<span class="badge {role_badge_class}">{esc_role}</span>'
+
+        # Verification Badge HTML
+        verify_class = "badge-verified" if u_is_verified else "badge-unverified"
+        verify_label = "Verified" if u_is_verified else "Unverified"
+        verify_html = f'<span class="badge {verify_class}">{verify_label}</span>'
+
+        # MFA Badge HTML
+        mfa_html = ""
+        if u_totp_enabled:
+            mfa_html = '<span class="badge badge-mfa">Authenticator</span>'
+        elif u_two_factor_enabled:
+            mfa_html = '<span class="badge badge-mfa">Email OTP</span>'
+        else:
+            mfa_html = '<span class="badge badge-none">None</span>'
+
+        # Actions Column HTML
+        actions_html = []
+        
+        # Guard: Prevent the current admin from modifying/deleting themselves
+        if u_id == user_id:
+            actions_html.append('<span style="font-size: 0.8rem; color: var(--color-text-muted); font-style: italic;">Self (No Actions)</span>')
+        else:
+            # Toggle Role
+            role_btn_label = "Demote to User" if u_role == "admin" else "Promote to Admin"
+            actions_html.append(
+                f'<form action="/admin/user/promote" method="post" style="display:inline;">'
+                f'<input type="hidden" name="csrf_token" value="{csrf}">'
+                f'<input type="hidden" name="user_id" value="{u_id}">'
+                f'<button type="submit" class="btn-admin-action">{role_btn_label}</button>'
+                f'</form>'
+            )
+
+            # Revoke Sessions
+            if u_session_count > 0:
+                actions_html.append(
+                    f'<form action="/admin/user/revoke-sessions" method="post" style="display:inline;">'
+                    f'<input type="hidden" name="csrf_token" value="{csrf}">'
+                    f'<input type="hidden" name="user_id" value="{u_id}">'
+                    f'<button type="submit" class="btn-admin-action">Revoke Sessions</button>'
+                    f'</form>'
+                )
+
+            # Delete User
+            actions_html.append(
+                f'<form action="/admin/user/delete" method="post" style="display:inline;" onsubmit="return confirm(\'Are you sure you want to permanently delete user {esc_username}?\');">'
+                f'<input type="hidden" name="csrf_token" value="{csrf}">'
+                f'<input type="hidden" name="user_id" value="{u_id}">'
+                f'<button type="submit" class="btn-admin-action btn-admin-danger">Delete</button>'
+                f'</form>'
+            )
+
+        actions_str = " ".join(actions_html)
+
+        # Build Row HTML
+        row_html = (
+            f'<tr>'
+            f'  <td style="padding: 14px 16px;"><span class="admin-avatar-small">{avatar_html}</span><strong>{esc_username}</strong></td>'
+            f'  <td style="padding: 14px 16px;">{esc_email}</td>'
+            f'  <td style="padding: 14px 16px;">{role_html}</td>'
+            f'  <td style="padding: 14px 16px;">{verify_html}</td>'
+            f'  <td style="padding: 14px 16px;">{mfa_html}</td>'
+            f'  <td style="padding: 14px 16px; font-weight: 600;">{u_session_count}</td>'
+            f'  <td style="padding: 14px 16px; text-align: right;">{actions_str}</td>'
+            f'</tr>'
+        )
+        user_rows.append(row_html)
+
+    user_rows_str = "\n".join(user_rows)
+
+    page = _render_page(
+        "admin.html",
+        {
+            "{{title}}": "Admin Dashboard - Security Vulnerability Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{csrf_token}}": html.escape(csrf, quote=True),
+            "{{total_users}}": str(total_users),
+            "{{total_sessions}}": str(total_sessions),
+            "{{user_rows}}": user_rows_str,
+        }
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/admin/user/promote")
+async def promote_user(request: Request, user_id: int = Form(None)):
+    """Toggle a user's role between admin and user."""
+    # 1. Auth & Admin Authorization check
+    current_user_id = request.session.get("user_id")
+    if not current_user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        admin_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [current_user_id]).fetchone()
+        if not admin_row or admin_row["role"] != "admin":
+            return HTMLResponse(content="Forbidden", status_code=403)
+
+        admin_username = admin_row["username"]
+        ip = request.client.host if request and request.client else ""
+
+        # 2. Input check & self-promotion guard
+        if user_id is None or user_id == current_user_id:
+            audit_logger.log_security_event("role_change_attempt", admin_username, ip, "failure: Invalid user ID or self-demotion attempt")
+            return RedirectResponse(url="/admin", status_code=303)
+
+        # Check target user
+        target_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [user_id]).fetchone()
+        if not target_row:
+            return RedirectResponse(url="/admin", status_code=303)
+
+        target_username = target_row["username"]
+        new_role = "user" if target_row["role"] == "admin" else "admin"
+
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", [new_role, user_id])
+        conn.commit()
+
+        audit_logger.log_security_event("role_change", admin_username, ip, f"Changed role for user {target_username} to {new_role}")
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@router.post("/admin/user/delete")
+async def delete_user(request: Request, user_id: int = Form(None)):
+    """Delete a user account entirely."""
+    # 1. Auth & Admin Authorization check
+    current_user_id = request.session.get("user_id")
+    if not current_user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        admin_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [current_user_id]).fetchone()
+        if not admin_row or admin_row["role"] != "admin":
+            return HTMLResponse(content="Forbidden", status_code=403)
+
+        admin_username = admin_row["username"]
+        ip = request.client.host if request and request.client else ""
+
+        # 2. Input check & self-deletion guard
+        if user_id is None or user_id == current_user_id:
+            audit_logger.log_security_event("user_delete_attempt", admin_username, ip, "failure: Invalid user ID or self-delete attempt")
+            return RedirectResponse(url="/admin", status_code=303)
+
+        # Check target user
+        target_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        if not target_row:
+            return RedirectResponse(url="/admin", status_code=303)
+
+        target_username = target_row["username"]
+
+        conn.execute("DELETE FROM users WHERE id = ?", [user_id])
+        conn.commit()
+
+        audit_logger.log_security_event("user_delete", admin_username, ip, f"Deleted user {target_username}")
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/admin", status_code=303)
+
+
+@router.post("/admin/user/revoke-sessions")
+async def revoke_user_sessions(request: Request, user_id: int = Form(None)):
+    """Revoke all active sessions for a user."""
+    # 1. Auth & Admin Authorization check
+    current_user_id = request.session.get("user_id")
+    if not current_user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        admin_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [current_user_id]).fetchone()
+        if not admin_row or admin_row["role"] != "admin":
+            return HTMLResponse(content="Forbidden", status_code=403)
+
+        admin_username = admin_row["username"]
+        ip = request.client.host if request and request.client else ""
+
+        # 2. Input check
+        if user_id is None:
+            return RedirectResponse(url="/admin", status_code=303)
+
+        # Check target user
+        target_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        if not target_row:
+            return RedirectResponse(url="/admin", status_code=303)
+
+        target_username = target_row["username"]
+
+        # Revoke all sessions
+        conn.execute("DELETE FROM sessions WHERE user_id = ?", [user_id])
+        conn.commit()
+
+        audit_logger.log_security_event("sessions_revoke_all", admin_username, ip, f"Revoked all sessions for user {target_username}")
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/admin", status_code=303)

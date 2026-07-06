@@ -1,0 +1,141 @@
+/* ============================================================
+   Design Tokens & CSS Custom Properties
+   ============================================================ */
+
+:root {
+    color-scheme: light dark;
+
+    /* Surfaces */
+    --color-bg-body:           #ffffff;
+    --color-bg-dashboard:      #eef1f8;
+    --color-bg-surface:        #ffffff;
+    --color-bg-input:          #f8f9ff;
+    --color-bg-header:         #ffffff;
+
+    /* Text */
+    --color-text-primary:      #1e293b;
+    --color-text-secondary:    #475569;
+    --color-text-muted:        #64748b;
+    --color-text-accent:       #1a237e;
+    --color-text-on-brand:     #ffffff;
+
+    /* Borders & dividers */
+    --color-border-soft:       #e2e8f0;
+    --color-border-input:      #c5cae9;
+    --color-border-input-focus:#3949ab;
+
+    /* Brand gradients & accents */
+    --color-brand-primary:     #1a237e;
+    --color-brand-secondary:   #3949ab;
+    --color-brand-tertiary:    #283593;
+    --color-brand-deep:        #0d1b5e;
+
+    /* Shadows */
+    --shadow-focus:            0 0 0 3px rgba(57, 73, 171, 0.12);
+    --shadow-header:           0 2px 10px rgba(26, 35, 126, 0.08);
+    --shadow-card-hover:       0 4px 16px rgba(26, 35, 126, 0.10);
+
+    /* Error palette */
+    --color-error-bg:          #fef2f2;
+    --color-error-border:      #fecaca;
+    --color-error-text:        #991b1b;
+    --color-error-inline:      #dc2626;
+
+    /* Success palette */
+    --color-success-bg:        #dcfce7;
+    --color-success-border:    #86efac;
+    --color-success-text:      #166534;
+
+    /* Vulnerability tag pairs (background, text) */
+    --tag-sqli-bg:    #fef9c3;  --tag-sqli-fg:    #854d0e;
+    --tag-xss-bg:     #fee2e2;  --tag-xss-fg:     #991b1b;
+    --tag-session-bg: #f3e8ff;  --tag-session-fg: #6b21a8;
+    --tag-brute-bg:   #ffedd5;  --tag-brute-fg:   #9a3412;
+    --tag-crypto-bg:  #dcfce7;  --tag-crypto-fg:  #166534;
+    --tag-exposed-bg: #dbeafe;  --tag-exposed-fg: #1e40af;
+    --tag-csrf-bg:    #fce7f3;  --tag-csrf-fg:    #9d174d;
+
+    /* Step cards (dashboard) */
+    --color-step-bg:      #1a237e;
+    --color-step-text:    #ffffff;
+    --color-step-muted:   rgba(255, 255, 255, 0.85);
+    --color-step-badge:   rgba(255, 255, 255, 0.2);
+
+    /* Password strength bar colors */
+    --strength-color-empty:      #e0e3eb;
+    --strength-color-very-weak:  #d32f2f;
+    --strength-color-weak:       #f57c00;
+    --strength-color-fair:       #fbc02d;
+    --strength-color-good:       #689f38;
+    --strength-color-strong:     #2e7d32;
+    --criterion-met-color:       #2e7d32;
+    --criterion-unmet-color:     #64748b;
+}
+
+:root[data-theme="dark"] {
+    /* Surfaces */
+    --color-bg-body:           #0f172a;
+    --color-bg-dashboard:      #0b1220;
+    --color-bg-surface:        #1e293b;
+    --color-bg-input:          #111827;
+    --color-bg-header:         #0b1220;
+
+    /* Text */
+    --color-text-primary:      #e2e8f0;
+    --color-text-secondary:    #cbd5e1;
+    --color-text-muted:        #94a3b8;
+    --color-text-accent:       #a5b4fc;
+    --color-text-on-brand:     #ffffff;
+
+    /* Borders & dividers */
+    --color-border-soft:       #1f2937;
+    --color-border-input:      #334155;
+    --color-border-input-focus:#a5b4fc;
+
+    /* Brand gradients & accents */
+    --color-brand-primary:     #3949ab;
+    --color-brand-secondary:   #5c6bc0;
+    --color-brand-tertiary:    #283593;
+    --color-brand-deep:        #1a237e;
+
+    /* Shadows */
+    --shadow-focus:            0 0 0 3px rgba(165, 180, 252, 0.25);
+    --shadow-header:           0 2px 10px rgba(0, 0, 0, 0.45);
+    --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.50);
+
+    /* Error palette */
+    --color-error-bg:          #3f1d1d;
+    --color-error-border:      #7f1d1d;
+    --color-error-text:        #fecaca;
+    --color-error-inline:      #fca5a5;
+
+    /* Success palette */
+    --color-success-bg:        #102a18;
+    --color-success-border:    #14532d;
+    --color-success-text:      #86efac;
+
+    /* Vulnerability tag pairs */
+    --tag-sqli-bg:    #3a2e0a;  --tag-sqli-fg:    #facc15;
+    --tag-xss-bg:     #3a1414;  --tag-xss-fg:     #fca5a5;
+    --tag-session-bg: #2e1a4d;  --tag-session-fg: #d8b4fe;
+    --tag-brute-bg:   #3a2210;  --tag-brute-fg:   #fdba74;
+    --tag-crypto-bg:  #102a18;  --tag-crypto-fg:  #86efac;
+    --tag-exposed-bg: #102036;  --tag-exposed-fg: #93c5fd;
+    --tag-csrf-bg:    #3a1432;  --tag-csrf-fg:    #f9a8d4;
+
+    /* Step cards */
+    --color-step-bg:      #1a237e;
+    --color-step-text:    #ffffff;
+    --color-step-muted:   rgba(255, 255, 255, 0.78);
+    --color-step-badge:   rgba(255, 255, 255, 0.18);
+
+    /* Password strength bar colors */
+    --strength-color-empty:      #2a2f3a;
+    --strength-color-very-weak:  #ef5350;
+    --strength-color-weak:       #ffa726;
+    --strength-color-fair:       #ffd54f;
+    --strength-color-good:       #9ccc65;
+    --strength-color-strong:     #66bb6a;
+    --criterion-met-color:       #9ccc65;
+    --criterion-unmet-color:     #a0aec0;
+}

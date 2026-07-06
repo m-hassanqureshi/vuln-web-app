@@ -1,0 +1,27 @@
+/* ============================================================
+   Global Reset & Base HTML Styles
+   ============================================================ */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 0.9rem;
+    font-weight: 400;
+    background: var(--color-bg-body);
+    color: var(--color-text-primary);
+    line-height: 1.6;
+}
+
+a {
+    color: var(--color-text-accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}

@@ -1,34 +1,13 @@
-"""Email-verification business logic (token issue / verify / resend).
-
-This is the only module that touches the verification columns on the ``users``
-table. It is the email-verification analog of ``oauth_service.py``: the route
-layer in ``api/routes/auth.py`` calls these functions and renders/redirects on
-the result.
-
-Security posture (all preserved from the closed vulnerabilities):
-- VULN-1 (SQL Injection): every SELECT/UPDATE here is parameterized -- never
-  concatenate.
-- VULN-3 (Reflected XSS): the token is never reflected back to the client; the
-  /verify route renders a fixed outcome message, not the token.
-- VULN-7 / VULN-8: the resend entry point is reached only via ``POST
-  /verify/resend``, which the existing rate-limit + CSRF middleware already
-  guard. This module adds no new auth surface of its own.
-
-Token model (Option A -- stateful):
-- ``secrets.token_urlsafe(32)`` (256-bit) stored raw in ``verification_token``.
-- ``verification_token_expires`` is ``time.time()`` + TTL (default 1 hour).
-- A successful verify clears both columns, making the link single-use.
-"""
-
 import logging
 import secrets
 import threading
 import time
 
+from starlette.requests import Request
 from fastapi.responses import JSONResponse
 
 from app.db.session import get_db
-from app.core import config, mailer
+from app.core import config, mailer, audit_logger
 from app.core.security import verify_password
 from app.services import lockout_service
 
@@ -86,7 +65,7 @@ def start_verification(
     return mailer.send_verification_email(email, username, verify_url)
 
 
-def verify_email_token(token: str) -> dict:
+def verify_email_token(token: str, request: Request = None) -> dict:
     """Validate a verification token and mark the account verified on success.
 
     Returns a dict ``{"status": <str>, "user": <dict|None>}`` where status is:
@@ -102,7 +81,9 @@ def verify_email_token(token: str) -> dict:
     The token is looked up by exact match -- it is never reflected back to the
     caller (VULN-3 posture).
     """
+    ip = request.client.host if request and request.client else ""
     if not token:
+        audit_logger.log_security_event("email_verified", "unknown", ip, "failure: Empty token")
         return {"status": "invalid", "user": None}
 
     conn = get_db()
@@ -115,10 +96,13 @@ def verify_email_token(token: str) -> dict:
         ).fetchone()
         if not row:
             # No outstanding token matches (never issued, or already consumed).
+            audit_logger.log_security_event("email_verified", "unknown", ip, "failure: Token not found or already used")
             return {"status": "invalid", "user": None}
 
+        username = row["username"]
         expires = row["verification_token_expires"]
         if expires is None or time.time() > float(expires):
+            audit_logger.log_security_event("email_verified", username, ip, "failure: Expired token")
             return {"status": "expired", "user": None}
 
         # FIXED: SQL Injection closed -- parameterized UPDATE by primary key.
@@ -129,6 +113,7 @@ def verify_email_token(token: str) -> dict:
             [row["id"]],
         )
         conn.commit()
+        audit_logger.log_security_event("email_verified", username, ip, "success")
         return {
             "status": "ok",
             "user": {
@@ -137,15 +122,16 @@ def verify_email_token(token: str) -> dict:
                 "email": row["email"],
             },
         }
-    except Exception:
+    except Exception as e:
         # Never surface DB internals; the route maps "invalid" to a generic page.
         logger.exception("verify_email_token failed")
+        audit_logger.log_security_event("email_verified", "unknown", ip, f"failure: DB Error: {str(e)}")
         return {"status": "invalid", "user": None}
     finally:
         conn.close()
 
 
-def resend_for_credentials(username: str, password: str) -> JSONResponse:
+def resend_for_credentials(username: str, password: str, request: Request = None) -> JSONResponse:
     """Re-issue + re-send the verification email, gated on valid credentials.
 
     Because login is BLOCKED until verification (v1.0.4 posture), an unverified
@@ -165,7 +151,9 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
     The caller (``POST /verify/resend``) is a POST, so the existing CSRF and
     rate-limit middleware already guard it.
     """
+    ip = request.client.host if request and request.client else ""
     if not username or not password:
+        audit_logger.log_security_event("email_verification_resend", username or "unknown", ip, "failure: Missing credentials")
         return JSONResponse(
             content={"error": "Invalid username or password"}, status_code=401
         )
@@ -190,6 +178,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
     if row:
         remaining = lockout_service.seconds_remaining(row)
         if remaining > 0:
+            audit_logger.log_security_event("email_verification_resend", username, ip, f"failure: Account locked ({remaining}s remaining)")
             return JSONResponse(
                 content={
                     "error": lockout_service.lock_message(remaining),
@@ -209,6 +198,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
                 row["id"], row["failed_login_attempts"]
             )
             if remaining > 0:
+                audit_logger.log_security_event("email_verification_resend", username, ip, "locked: Max failed resend attempts exceeded")
                 return JSONResponse(
                     content={
                         "error": lockout_service.lock_message(remaining),
@@ -217,6 +207,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
                     },
                     status_code=401,
                 )
+        audit_logger.log_security_event("email_verification_resend", username, ip, "failure: Invalid credentials")
         return JSONResponse(
             content={"error": "Invalid username or password"}, status_code=401
         )
@@ -226,6 +217,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
 
     if row["is_verified"]:
         # Already verified -- a no-op success, never re-issuing/un-verifying.
+        audit_logger.log_security_event("email_verification_resend", username, ip, "ignored: Already verified")
         return JSONResponse(
             content={
                 "success": True,
@@ -234,6 +226,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
         )
 
     if start_verification(row["id"], row["username"], row["email"]):
+        audit_logger.log_security_event("email_verification_resend", username, ip, "success")
         return JSONResponse(
             content={
                 "success": True,
@@ -241,6 +234,7 @@ def resend_for_credentials(username: str, password: str) -> JSONResponse:
             }
         )
 
+    audit_logger.log_security_event("email_verification_resend", username, ip, "failure: Send failed")
     return JSONResponse(
         content={
             "error": "Could not send the verification email. Please try again later."

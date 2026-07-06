@@ -1,0 +1,159 @@
+{{partial:header}}
+
+<!-- Hero Banner -->
+<section class="hero-banner">
+    <div class="hero-left">
+        <h1 class="hero-title">Admin Control Panel</h1>
+        <p class="hero-subtitle">Manage users, security configurations, and active sessions</p>
+    </div>
+    <div class="hero-right">
+        <a href="/welcome" class="btn btn-logout">Dashboard</a>
+        <a href="/profile" class="btn btn-logout">My Profile</a>
+        <a href="/logout" class="btn btn-logout">Logout</a>
+    </div>
+</section>
+
+<!-- Main Container -->
+<main class="dashboard-content admin-content" style="max-width: 1200px; margin: 0 auto; padding: 24px;">
+    <!-- System Status / Info Panel -->
+    <div class="profile-card" style="margin-bottom: 24px; padding: 24px;">
+        <h2 class="section-title">System Overview</h2>
+        <div style="display: flex; gap: 24px; flex-wrap: wrap; margin-top: 16px;">
+            <div style="flex: 1; min-width: 200px; background: var(--color-bg-input); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border-soft);">
+                <div style="font-size: 0.8rem; color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Total Users</div>
+                <div style="font-size: 1.8rem; font-weight: 700; color: var(--color-text-primary);">{{total_users}}</div>
+            </div>
+            <div style="flex: 1; min-width: 200px; background: var(--color-bg-input); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border-soft);">
+                <div style="font-size: 0.8rem; color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Active Sessions</div>
+                <div style="font-size: 1.8rem; font-weight: 700; color: var(--color-text-primary);">{{total_sessions}}</div>
+            </div>
+            <div style="flex: 1; min-width: 200px; background: var(--color-bg-input); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border-soft);">
+                <div style="font-size: 0.8rem; color: var(--color-text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Auditing Status</div>
+                <div style="font-size: 1.8rem; font-weight: 700; color: var(--color-success);">Active</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table Card -->
+    <div class="profile-card" style="padding: 24px;">
+        <h2 class="section-title" style="margin-bottom: 20px;">User Registry</h2>
+        
+        <div class="table-responsive" style="overflow-x: auto; width: 100%;">
+            <table class="admin-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 2px solid var(--color-border-soft); color: var(--color-text-muted); font-size: 0.85rem; font-weight: 600;">
+                        <th style="padding: 12px 16px;">User</th>
+                        <th style="padding: 12px 16px;">Email</th>
+                        <th style="padding: 12px 16px;">Role</th>
+                        <th style="padding: 12px 16px;">Verification</th>
+                        <th style="padding: 12px 16px;">Two-Factor (MFA)</th>
+                        <th style="padding: 12px 16px;">Active Sessions</th>
+                        <th style="padding: 12px 16px; text-align: right;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{user_rows}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<style>
+/* Custom Styles for Admin Control Panel */
+.admin-table tbody tr {
+    border-bottom: 1px solid var(--color-border-soft);
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    transition: background 0.15s ease;
+}
+.admin-table tbody tr:hover {
+    background: var(--color-bg-input);
+}
+.admin-table td {
+    padding: 14px 16px;
+    vertical-align: middle;
+}
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-admin {
+    background-color: var(--color-text-accent);
+    color: #121414;
+}
+.badge-user {
+    background-color: var(--color-border-soft);
+    color: var(--color-text-secondary);
+}
+.badge-verified {
+    background-color: rgba(46, 117, 89, 0.15);
+    color: var(--color-success);
+    border: 1px solid rgba(46, 117, 89, 0.2);
+}
+.badge-unverified {
+    background-color: rgba(186, 26, 26, 0.1);
+    color: var(--color-error);
+    border: 1px solid rgba(186, 26, 26, 0.15);
+}
+.badge-mfa {
+    background-color: rgba(74, 94, 122, 0.15);
+    color: var(--color-text-accent);
+    border: 1px solid rgba(74, 94, 122, 0.2);
+}
+.badge-none {
+    background-color: var(--color-border-soft);
+    color: var(--color-text-muted);
+}
+.btn-admin-action {
+    display: inline-block;
+    padding: 5px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid var(--color-border-soft);
+    background: var(--color-bg-surface);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s ease;
+    margin-left: 4px;
+}
+.btn-admin-action:hover {
+    background: var(--color-border-soft);
+    color: var(--color-text-primary);
+}
+.btn-admin-danger {
+    color: var(--color-error);
+    border-color: rgba(186, 26, 26, 0.2);
+}
+.btn-admin-danger:hover {
+    background: var(--color-error);
+    color: white;
+    border-color: var(--color-error);
+}
+.admin-avatar-small {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--color-border-soft);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+.admin-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+</style>
+
+</body>
+</html>

@@ -121,7 +121,10 @@ def init_db():
             otp_last_sent              REAL,
             totp_secret                TEXT,
             totp_enabled               INTEGER DEFAULT 0,
-            totp_last_step             INTEGER
+            totp_last_step             INTEGER,
+            reset_token                TEXT,
+            reset_token_expires        REAL,
+            role                       TEXT DEFAULT 'user'
         )"""
     )
 
@@ -160,6 +163,11 @@ def init_db():
         "totp_secret": "ALTER TABLE users ADD COLUMN totp_secret TEXT",
         "totp_enabled": "ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0",
         "totp_last_step": "ALTER TABLE users ADD COLUMN totp_last_step INTEGER",
+        # Password-Reset feature: two columns for timed tokens.
+        "reset_token": "ALTER TABLE users ADD COLUMN reset_token TEXT",
+        "reset_token_expires": "ALTER TABLE users ADD COLUMN reset_token_expires REAL",
+        # Admin Dashboard (RBAC) feature: user roles
+        "role": "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
     }
     for column, ddl in migrations.items():
         if column not in existing:
@@ -173,6 +181,36 @@ def init_db():
                 # the column comes from CREATE TABLE above and is never in
                 # this branch, so new signups keep their explicit 0.)
                 conn.execute("UPDATE users SET is_verified = 1")
+
+    # Create the sessions table (Database-Backed Sessions feature).
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS sessions (
+            session_id    TEXT PRIMARY KEY,
+            user_id       INTEGER NOT NULL,
+            user_agent    TEXT,
+            ip_address    TEXT,
+            created_at    REAL NOT NULL,
+            last_activity REAL NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )"""
+    )
+
+    # Seed a default admin user if the table is empty.
+    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count == 0:
+        # Import dynamically to avoid circular import issues
+        from app.core.security import hash_password
+        admin_pass = hash_password("AdminPass123!")
+        conn.execute(
+            "INSERT INTO users (username, email, password, role, is_verified) VALUES (?, ?, ?, ?, ?)",
+            ["admin", "admin@example.com", admin_pass, "admin", 1]
+        )
+
+    # Promote any user specified in INITIAL_ADMIN_USERNAME environment variable to 'admin'
+    import os
+    initial_admin = os.environ.get("INITIAL_ADMIN_USERNAME")
+    if initial_admin:
+        conn.execute("UPDATE users SET role = 'admin' WHERE username = ?", [initial_admin])
 
     conn.commit()
     conn.close()

@@ -157,3 +157,39 @@ def send_otp_email(to_email: str, username: str, code: str) -> bool:
     if ok:
         logger.info("OTP email sent to %s", to_email)
     return ok
+
+
+def send_password_reset_email(to_email: str, username: str, reset_url: str) -> bool:
+    """Send the password reset link email. Returns True on success, else False.
+
+    Delivers via SendGrid. Never raises -- every failure path returns False.
+    Spliced parameters are html.escape'd defensively (VULN-2 posture).
+    """
+    if not config.is_email_configured():
+        logger.warning("Email not configured; skipping password reset email to %s", to_email)
+        return False
+
+    safe_username = html.escape(username or "", quote=True)
+    safe_url = html.escape(reset_url, quote=True)
+
+    subject = "Reset your password - Security Vulnerability Lab"
+    text_body = (
+        f"Hi {username},\n\n"
+        "We received a request to reset your password. If you did not make this request, "
+        "you can safely ignore this email.\n\n"
+        "To reset your password, visit the link below (valid for 1 hour):\n\n"
+        f"{reset_url}\n"
+    )
+    html_body = (
+        f"<p>Hi {safe_username},</p>"
+        "<p>We received a request to reset your password. If you did not make this request, "
+        "you can safely ignore this email.</p>"
+        "<p>To reset your password, click the link below (valid for 1 hour):</p>"
+        f'<p><a href="{safe_url}">Reset Password</a></p>'
+    )
+
+    ok = _deliver(to_email, subject, text_body, html_body)
+    if ok:
+        logger.info("Password reset email sent to %s", to_email)
+    return ok
+

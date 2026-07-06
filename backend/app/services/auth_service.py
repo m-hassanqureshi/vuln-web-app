@@ -22,12 +22,13 @@ from starlette.requests import Request
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from app.db.session import get_db
-from app.core import config
+from app.core import config, audit_logger
 from app.core.security import hash_password, verify_password
 from app.services import verification_service
 from app.services import lockout_service
 from app.services import otp_service
 from app.services import totp_service
+from app.services import session_service
 
 
 def password_meets_policy(password: str) -> bool:
@@ -51,7 +52,7 @@ def password_meets_policy(password: str) -> bool:
     )
 
 
-def signup(username: str, email: str, password: str):
+def signup(username: str, email: str, password: str, request: Request = None):
     """Create a new user account.
 
     Returns (one of):
@@ -70,6 +71,8 @@ def signup(username: str, email: str, password: str):
     # most cases client-side, but a hand-crafted POST can still skip it, so
     # we re-validate server-side.
     if not username or not email or not password:
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("signup", username or email or "unknown", ip, "failure", "All fields are required")
         return HTMLResponse(
             content="<h3>All fields are required</h3><a href='/signup'>Go back</a>",
             status_code=400,
@@ -101,6 +104,8 @@ def signup(username: str, email: str, password: str):
         # Triggered by the `UNIQUE` constraint on `username`. Distinct from
         # the generic Exception branch below so the user gets a precise
         # error message instead of a generic "Error: ...".
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("signup", username, ip, "failure", "Username already exists")
         return HTMLResponse(
             content="<h3>Username already exists</h3><a href='/signup'>Go back</a>",
             status_code=400,
@@ -110,6 +115,8 @@ def signup(username: str, email: str, password: str):
         # etc.). The error message is reflected back to the user; for a
         # production app you would log this server-side and show a
         # generic error instead.
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("signup", username, ip, "failure", f"DB Error: {str(e)}")
         return HTMLResponse(
             content=f"<h3>Error: {str(e)}</h3><a href='/signup'>Go back</a>",
             status_code=400,
@@ -126,6 +133,9 @@ def signup(username: str, email: str, password: str):
     # The signup routes already gate on is_email_configured(), so this is only
     # reached when SMTP is configured.
     verification_service.start_verification(user_id, username, email, background=True)
+
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_auth_event("signup", username, ip, "success", f"Email: {email}")
 
     # 302 to the "check your inbox" page instead of straight to /login: the
     # account is unverified and the user must confirm via the emailed link.
@@ -157,6 +167,8 @@ def login(request: Request, username: str, password: str):
     prevents username-enumeration via timing or message-text differences.
     """
     if not username or not password:
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("login", username or "unknown", ip, "failure", "Username and password are required")
         return JSONResponse(
             content={"error": "Username and password are required"},
             status_code=401,
@@ -179,6 +191,8 @@ def login(request: Request, username: str, password: str):
         # Treat any DB error as a failed login. We do not surface the
         # underlying exception (avoid leaking schema details to an
         # attacker probing the endpoint).
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("login", username, ip, "failure", "Database error during query")
         return JSONResponse(
             content={"error": "Invalid username or password"},
             status_code=401,
@@ -200,6 +214,8 @@ def login(request: Request, username: str, password: str):
     if user:
         remaining = lockout_service.seconds_remaining(user)
         if remaining > 0:
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_auth_event("login", username, ip, "locked", f"Locked remaining: {remaining}s")
             return JSONResponse(
                 content={
                     "error": lockout_service.lock_message(remaining),
@@ -223,6 +239,8 @@ def login(request: Request, username: str, password: str):
         # reveal a "Resend verification email" affordance. No session is
         # written, so an unverified user cannot reach /welcome.
         if not user["is_verified"]:
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_auth_event("login", username, ip, "failure", "Account not verified")
             return JSONResponse(
                 content={
                     "error": (
@@ -246,6 +264,8 @@ def login(request: Request, username: str, password: str):
             request.session["pending_2fa_user_id"] = user["id"]
             request.session["pending_2fa_username"] = user["username"]
             request.session["pending_2fa_method"] = "totp"
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_auth_event("login", username, ip, "pending_2fa", "TOTP required")
             return JSONResponse(
                 content={"otp_required": True, "redirect": "/login/totp"}
             )
@@ -262,6 +282,8 @@ def login(request: Request, username: str, password: str):
             if not config.is_email_configured():
                 # Fail closed: 2FA is on but we cannot deliver the code. Never
                 # bypass the second factor by silently completing login.
+                ip = request.client.host if request and request.client else ""
+                audit_logger.log_auth_event("login", username, ip, "failure", "Email OTP required but email unconfigured")
                 return JSONResponse(
                     content={
                         "error": (
@@ -283,6 +305,8 @@ def login(request: Request, username: str, password: str):
             otp_service.start_challenge(
                 user["id"], user["username"], user["email"], background=True
             )
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_auth_event("login", username, ip, "pending_2fa", "Email OTP required")
             return JSONResponse(
                 content={"otp_required": True, "redirect": "/login/otp"}
             )
@@ -292,9 +316,9 @@ def login(request: Request, username: str, password: str):
         # response. The CSRF token (already in the session from the prior GET
         # /login page render) is preserved -- we are merging keys, not replacing
         # the whole session.
-        request.session["user_id"] = user["id"]
-        request.session["username"] = user["username"]
-        request.session["email"] = user["email"]
+        session_service.establish_session(request, user["id"], user["username"], user["email"])
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("login", username, ip, "success")
         return JSONResponse(content={"success": True, "redirect": "/welcome"})
     else:
         # Wrong password. For an EXISTING account, count this toward the lockout
@@ -305,6 +329,8 @@ def login(request: Request, username: str, password: str):
                 user["id"], user["failed_login_attempts"]
             )
             if remaining > 0:
+                ip = request.client.host if request and request.client else ""
+                audit_logger.log_auth_event("login", username, ip, "locked", f"Triggered lockout. Lockout duration remaining: {remaining}s")
                 return JSONResponse(
                     content={
                         "error": lockout_service.lock_message(remaining),
@@ -315,6 +341,8 @@ def login(request: Request, username: str, password: str):
                 )
         # Same JSON body for "no such user" and "wrong-but-not-yet-locked
         # password". See the docstring's note on enumeration resistance.
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_auth_event("login", username, ip, "failure", "Invalid credentials")
         return JSONResponse(
             content={"error": "Invalid username or password"},
             status_code=401,
@@ -345,9 +373,13 @@ def change_password(request: Request, current_password: str, new_password: str):
     # defense in depth so the service is safe to call directly.
     user_id = request.session.get("user_id")
     if not user_id:
+        audit_logger.log_security_event("password_change", "unauthenticated", "", "failure: Not authenticated")
         return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
 
     if not current_password or not new_password:
+        username = request.session.get("username", "")
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_security_event("password_change", username, ip, "failure: Missing fields")
         return JSONResponse(
             content={"error": "Current and new password are required"},
             status_code=400,
@@ -359,6 +391,9 @@ def change_password(request: Request, current_password: str, new_password: str):
     # rejects a weak new password server-side. The profile form runs the
     # identical check in JS, but this is the authoritative gate.
     if not password_meets_policy(new_password):
+        username = request.session.get("username", "")
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_security_event("password_change", username, ip, "failure: Password meets policy failed")
         return JSONResponse(
             content={
                 "error": (
@@ -382,6 +417,7 @@ def change_password(request: Request, current_password: str, new_password: str):
         if not user:
             # Session references a row that no longer exists (no delete flow
             # exists, so this is defensive only).
+            audit_logger.log_security_event("password_change", "unknown", "", "failure: User row not found")
             return JSONResponse(content={"error": "Not authenticated"}, status_code=401)
 
         # FIXED: Weak Password Storage closed -- verify the CURRENT password
@@ -389,6 +425,9 @@ def change_password(request: Request, current_password: str, new_password: str):
         # row, so such accounts cannot change their password here; they must
         # re-register, exactly like the login flow.
         if not verify_password(current_password, user["password"]):
+            username = request.session.get("username", "")
+            ip = request.client.host if request and request.client else ""
+            audit_logger.log_security_event("password_change", username, ip, "failure: Current password incorrect")
             return JSONResponse(
                 content={"error": "Current password is incorrect"},
                 status_code=401,
@@ -399,11 +438,17 @@ def change_password(request: Request, current_password: str, new_password: str):
         hashed = hash_password(new_password)
         conn.execute(update_query, [hashed, user_id])
         conn.commit()
+        username = request.session.get("username", "")
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_security_event("password_change", username, ip, "success")
         return JSONResponse(
             content={"success": True, "message": "Password updated successfully"}
         )
-    except Exception:
+    except Exception as e:
         # Generic error -- never reflect the underlying DB exception text.
+        username = request.session.get("username", "")
+        ip = request.client.host if request and request.client else ""
+        audit_logger.log_security_event("password_change", username, ip, f"failure: DB Error: {str(e)}")
         return JSONResponse(
             content={"error": "Could not update password"},
             status_code=400,

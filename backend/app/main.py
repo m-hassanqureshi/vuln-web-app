@@ -18,7 +18,8 @@ import secrets
 # directory containing main.py itself.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -26,8 +27,50 @@ from app.api.routes.auth import router
 from app.core.csrf import CSRFMiddleware
 from app.core.rate_limit import RateLimitMiddleware
 from app.db.session import init_db
+from app.services import session_service
 
 app = FastAPI(title="Vulnerable Web Application - Security Lab")
+
+
+@app.middleware("http")
+async def verify_db_session_middleware(request: Request, call_next):
+    """Intercept requests to verify the session_id is active in the database.
+
+    If the session is invalid/revoked, clears the cookie and redirects to login.
+    """
+    # Bypass verification for static files to save DB queries
+    if request.url.path.startswith("/static"):
+        return await call_next(request)
+
+    user_id = request.session.get("user_id")
+    session_id = request.session.get("session_id")
+
+    if user_id and session_id:
+        if not session_service.verify_session(session_id):
+            # Session was deleted/revoked. Clear session cookie.
+            request.session.clear()
+            
+            # Bypass redirect if requesting public endpoints to prevent loops
+            public_paths = [
+                "/login",
+                "/signup",
+                "/forgot-password",
+                "/reset-password",
+                "/auth/google",
+                "/check-email",
+                "/verify",
+                "/verify/resend"
+            ]
+            is_public = any(request.url.path == p or request.url.path.startswith(p) for p in public_paths)
+            
+            if not is_public:
+                if request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", ""):
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse(content={"error": "Session expired or revoked."}, status_code=401)
+                return RedirectResponse(url="/login", status_code=302)
+                
+    return await call_next(request)
+
 
 # NOTE on Starlette middleware ordering: add_middleware() PREPENDS to the
 # internal middleware list, so the LAST add_middleware call is the
@@ -75,6 +118,19 @@ app.include_router(router)
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..")
 app.mount("/static/css", StaticFiles(directory=os.path.join(BASE_DIR, "frontend", "static", "css")), name="css")
 app.mount("/static/images", StaticFiles(directory=os.path.join(BASE_DIR, "frontend", "static", "images")), name="images")
+# Mount for any future /static/js assets. Created for the toast helper
+# (frontend/static/js/toast.js) loaded by the shared header partial. Like
+# the other mounts, it serves files straight off disk -- no caching, no
+# transformation -- so a future change to toast.js is picked up on the
+# next page load without a server restart.
+app.mount("/static/js", StaticFiles(directory=os.path.join(BASE_DIR, "frontend", "static", "js")), name="js")
+
+# Mount for profile picture uploads (avatars). Auto-created on startup so the
+# directory is guaranteed to exist without manual developer intervention.
+UPLOADS_DIR = os.path.join(BASE_DIR, "frontend", "static", "uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+app.mount("/static/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
 
 # Create the users table if it doesn't exist. Idempotent -- safe across
 # restarts. Existing user rows are preserved.
