@@ -402,10 +402,27 @@ still resolve). Planned items have no tag yet.
 
 ## EC2 Deployment
 
-To deploy this application on an AWS EC2 instance (Ubuntu), a script is provided:
-
+### Manual Deployment
+To deploy this application on an AWS EC2 instance (Ubuntu Server):
 1. Clone the repository on your EC2 instance.
-2. Run `./deploy_ec2.sh` to install Docker, Docker Compose, and spin up the container in the background on Port 3001.
+2. Run the deployment script:
+   ```bash
+   chmod +x deploy_ec2.sh
+   ./deploy_ec2.sh
+   ```
+   This installs Docker & Docker Compose, creates a `.env` file, and boots up the container in the background on Port 3001.
+
+### Automated Deployment (GitHub Actions CD)
+We have configured a continuous deployment pipeline under `.github/workflows/deploy.yml`. To enable automated deployment on push to `main`:
+1. Add these Secrets to your GitHub repository under **Settings > Secrets and variables > Actions**:
+   * `EC2_HOST`: Your EC2 public IP.
+   * `EC2_USERNAME`: Your SSH username (`ubuntu`).
+   * `EC2_SSH_KEY`: The content of your private key (`.pem` file).
+2. Ensure Port 22 (SSH) in your EC2 Security Group is open to allow connection from GitHub's runner IPs.
+
+### Google OAuth & CAPTCHA configuration on EC2
+* **Google OAuth**: Google doesn't accept raw IP addresses as JavaScript origins or redirect URIs. To bypass this, you can use a free wildcard DNS service like `sslip.io`. For example, configure your Google credentials using `http://<EC2-IP>.sslip.io:3001` and update `GOOGLE_REDIRECT_URI` and `APP_BASE_URL` in your `.env` file accordingly.
+* **Turnstile CAPTCHA**: Use the public test keys (`1x00000000000000000000AA` / `1x000000000000000000000000000000AA`) in your `.env` to bypass hostname validation when testing on public IP/wildcard domains.
 
 ---
 
