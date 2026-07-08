@@ -4,7 +4,7 @@ An intentionally vulnerable web application designed to teach common security vu
 
 Built with FastAPI and SQLite — simple enough to read in one sitting, realistic enough to demonstrate actual attack techniques.
 
-**Live Demo of v0.1.0:** https://vuln-web-app.onrender.com
+**Live Demo of v0.1.0:** https://vuln-web-app.onrender.com | **EC2 Live Demo:** http://51.21.201.20.sslip.io:3001
 
 > **WARNING:** This application is deliberately insecure. It is designed for educational use only and should never be deployed to production or used on systems you do not own.
 
