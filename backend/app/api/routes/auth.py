@@ -100,6 +100,9 @@ def _render_page(name: str, replacements: dict[str, str]) -> str:
     # Then apply all caller-supplied tokens.
     for token, value in replacements.items():
         page = page.replace(token, value)
+    # Clean up Turnstile header placeholder if not replaced by route
+    if "{{turnstile_head}}" in page:
+        page = page.replace("{{turnstile_head}}", "")
     return page
 
 

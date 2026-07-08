@@ -34,6 +34,7 @@
          this partial. defer so the script runs after the DOM is parsed but
          before window.load -- safe to call from any inline <script> below. -->
     <script src="/static/js/toast.js" defer></script>
+    {{turnstile_head}}
 </head>
 <body {{body_attrs}}>
     <!-- Shared Header: brand, theme toggle, partner logos. The theme-toggle
