@@ -1,0 +1,202 @@
+{{partial:header}}
+
+<!-- Hero Banner -->
+<section class="hero-banner">
+    <div class="hero-left">
+        <h1 class="hero-title">Command Injection Lab</h1>
+        <p class="hero-subtitle">Learn how input concatenation in shell executions leads to RCE</p>
+    </div>
+    <div class="hero-right">
+        <a href="/welcome" class="btn btn-logout">Dashboard</a>
+        {{admin_link}}
+        <a href="/profile" class="btn btn-logout">Profile</a>
+        <a href="/logout" class="btn btn-logout">Logout</a>
+    </div>
+</section>
+
+<!-- Content Container -->
+<main class="dashboard-content" style="max-width: 1000px; margin: 0 auto; padding: 24px;">
+    <!-- Lab Status Card -->
+    <div class="profile-card" style="margin-bottom: 24px; padding: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div>
+            <h2 class="section-title">Vulnerability Status</h2>
+            <p style="color: var(--color-text-muted); margin-top: 4px;">Exploit in Vulnerable Mode, then prevent it in Secure Mode to solve the lab.</p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div id="status-badge" class="badge">
+                Loading...
+            </div>
+            <button onclick="resetLab()" class="btn-admin-action btn-admin-danger" style="margin: 0; padding: 8px 16px;">Reset Lab</button>
+        </div>
+    </div>
+
+    <!-- Instructions Card -->
+    <div class="profile-card" style="margin-bottom: 24px; padding: 24px;">
+        <h2 class="section-title" style="margin-bottom: 12px;">Lab Briefing</h2>
+        <p style="margin-bottom: 12px; line-height: 1.6;">
+            In many applications, network tools like <code>ping</code> are executed by calling shell commands. If input values are simply concatenated into a system shell prompt, special operators like <code>&amp;</code>, <code>|</code>, or <code>;</code> can be injected to run arbitrary code on the hosting server.
+        </p>
+        <div style="background: rgba(186, 26, 26, 0.1); border-left: 4px solid var(--color-error); padding: 12px 16px; border-radius: 4px; margin-bottom: 16px;">
+            <strong>Objective:</strong> 
+            <ol style="margin-left: 20px; margin-top: 6px; line-height: 1.5;">
+                <li>Inject a command using characters like <code>&amp;</code> or <code>|</code> in <strong>Vulnerable Mode</strong> (e.g. <code>127.0.0.1 &amp;&amp; whoami</code>).</li>
+                <li>Verify that the status changes to <strong style="color: var(--color-error);">EXPLOITED</strong>.</li>
+                <li>Toggle to <strong>Secure Mode</strong> and check that the same payload is blocked. Once verified, the lab becomes <strong style="color: var(--color-success);">SOLVED</strong>!</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- Playground Card -->
+    <div class="profile-card" style="padding: 24px; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--color-border-soft); padding-bottom: 12px;">
+            <h2 class="section-title">Playground</h2>
+            <div class="mode-toggles" style="display: flex; gap: 8px; background: var(--color-bg-input); padding: 4px; border-radius: 8px;">
+                <button onclick="setMode('vulnerable')" id="btn-mode-vulnerable" class="btn-admin-action" style="margin: 0; border: none; padding: 6px 12px; border-radius: 6px;">Vulnerable Mode</button>
+                <button onclick="setMode('secure')" id="btn-mode-secure" class="btn-admin-action" style="margin: 0; border: none; padding: 6px 12px; border-radius: 6px;">Secure Mode</button>
+            </div>
+        </div>
+
+        <form id="lab-form" onsubmit="runCommand(event)">
+            <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            <div class="form-group" style="margin-bottom: 16px;">
+                <label for="host" class="form-label" style="font-weight: 600; margin-bottom: 8px;">Ping Host or IP Address</label>
+                <div style="display: flex; gap: 12px;">
+                    <input type="text" id="host" name="host" class="form-input" style="flex: 1;" placeholder="e.g. 127.0.0.1" required>
+                    <button type="submit" id="btn-submit" class="btn btn-login" style="margin: 0; padding: 12px 24px;">Execute Ping</button>
+                </div>
+            </div>
+        </form>
+
+        <!-- Command Terminal Output -->
+        <div style="margin-top: 24px;">
+            <div style="background: #1e1e1e; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #333;">
+                <span style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56; display: inline-block;"></span>
+                <span style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e; display: inline-block;"></span>
+                <span style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f; display: inline-block;"></span>
+                <span style="color: #888; font-family: monospace; font-size: 0.8rem; margin-left: 12px;" id="terminal-title">ping -n 1 [host]</span>
+            </div>
+            <pre id="terminal-output" style="background: #121212; color: #a9b7c6; font-family: 'Courier New', Courier, monospace; font-size: 0.9rem; padding: 16px; margin: 0; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; overflow-x: auto; min-height: 120px; white-space: pre-wrap; word-wrap: break-word;">Ready to test. Output will be displayed here...</pre>
+        </div>
+    </div>
+</main>
+
+<script>
+let currentMode = 'vulnerable';
+let labStatus = '{{status}}';
+
+function updateUI() {
+    const btnVuln = document.getElementById('btn-mode-vulnerable');
+    const btnSec = document.getElementById('btn-mode-secure');
+    
+    if (currentMode === 'vulnerable') {
+        btnVuln.style.background = 'var(--color-text-accent)';
+        btnVuln.style.color = '#121414';
+        btnSec.style.background = 'transparent';
+        btnSec.style.color = 'var(--color-text-muted)';
+        document.getElementById('terminal-title').textContent = 'ping -n 1 [host] (VULNERABLE)';
+    } else {
+        btnSec.style.background = 'var(--color-text-accent)';
+        btnSec.style.color = '#121414';
+        btnVuln.style.background = 'transparent';
+        btnVuln.style.color = 'var(--color-text-muted)';
+        document.getElementById('terminal-title').textContent = 'ping -n 1 [host] (SECURE)';
+    }
+
+    const badge = document.getElementById('status-badge');
+    badge.className = 'badge';
+    if (labStatus === 'solved') {
+        badge.classList.add('badge-verified');
+        badge.textContent = 'Solved';
+        badge.style.background = 'rgba(46, 117, 89, 0.15)';
+        badge.style.color = 'var(--color-success)';
+    } else if (labStatus === 'exploited') {
+        badge.classList.add('badge-unverified');
+        badge.textContent = 'Exploited';
+        badge.style.background = 'rgba(186, 26, 26, 0.15)';
+        badge.style.color = 'var(--color-error)';
+    } else {
+        badge.classList.add('badge-none');
+        badge.textContent = 'Unsolved';
+        badge.style.background = 'var(--color-border-soft)';
+        badge.style.color = 'var(--color-text-secondary)';
+    }
+}
+
+function setMode(mode) {
+    currentMode = mode;
+    updateUI();
+}
+
+async function runCommand(event) {
+    event.preventDefault();
+    const hostInput = document.getElementById('host').value;
+    const btnSubmit = document.getElementById('btn-submit');
+    const termOutput = document.getElementById('terminal-output');
+    
+    btnSubmit.disabled = true;
+    btnSubmit.textContent = 'Executing...';
+    termOutput.textContent = 'Executing system command. Please wait...';
+
+    const formData = new URLSearchParams();
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+    formData.append('host', hostInput);
+    formData.append('mode', currentMode);
+
+    try {
+        const response = await fetch('/labs/command-injection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        const doc = new DOMParser().parseFromString(data.output || data.error || '', 'text/html');
+        termOutput.textContent = doc.body.textContent;
+        
+        if (data.status) {
+            labStatus = data.status;
+        }
+        
+        updateUI();
+    } catch (e) {
+        termOutput.textContent = 'Network or server error occurred: ' + e;
+    } finally {
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = 'Execute Ping';
+    }
+}
+
+async function resetLab() {
+    if (!confirm('Are you sure you want to reset your progress for this lab?')) return;
+    
+    const formData = new URLSearchParams();
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+    formData.append('lab_name', 'command_injection');
+
+    try {
+        const response = await fetch('/labs/reset', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        });
+        const data = await response.json();
+        labStatus = data.status || 'unsolved';
+        document.getElementById('host').value = '';
+        document.getElementById('terminal-output').textContent = 'Ready to test. Output will be displayed here...';
+        updateUI();
+    } catch (e) {
+        alert('Failed to reset lab: ' + e);
+    }
+}
+
+updateUI();
+</script>
+</body>
+</html>

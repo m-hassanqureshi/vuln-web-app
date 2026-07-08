@@ -195,6 +195,18 @@ def init_db():
         )"""
     )
 
+    # Create the lab_progress table (Advanced Vulnerability Labs feature).
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS lab_progress (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            lab_name    TEXT NOT NULL,
+            status      TEXT DEFAULT 'unsolved',
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, lab_name)
+        )"""
+    )
+
     # Seed a default admin user if the table is empty.
     count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     if count == 0:

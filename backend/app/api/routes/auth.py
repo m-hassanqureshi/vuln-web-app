@@ -430,6 +430,22 @@ async def welcome_page(request: Request):
     is_admin = bool(user_row and user_row["role"] == "admin")
     admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
 
+    # Fetch status of advanced vulnerability labs
+    ci_status = get_lab_status(user_id, "command_injection")
+    ssrf_status = get_lab_status(user_id, "ssrf")
+    xxe_status = get_lab_status(user_id, "xxe")
+
+    def make_badge(status):
+        if status == "solved":
+            return '<span class="badge badge-verified" style="background: rgba(46, 117, 89, 0.15); color: var(--color-success); font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; display: inline-flex; align-items: center; border: 1px solid rgba(46, 117, 89, 0.2);">Solved</span>'
+        elif status == "exploited":
+            return '<span class="badge badge-unverified" style="background: rgba(186, 26, 26, 0.15); color: var(--color-error); font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; display: inline-flex; align-items: center; border: 1px solid rgba(186, 26, 26, 0.2);">Exploited</span>'
+        return '<span class="badge badge-none" style="background: var(--color-border-soft); color: var(--color-text-secondary); font-size: 0.75rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; display: inline-flex; align-items: center;">Unsolved</span>'
+
+    ci_badge = make_badge(ci_status)
+    ssrf_badge = make_badge(ssrf_status)
+    xxe_badge = make_badge(xxe_status)
+
     page = _render_page(
         "dashboard.html",
         {
@@ -437,6 +453,9 @@ async def welcome_page(request: Request):
             "{{body_attrs}}": 'class="dashboard-body"',
             "{{username}}": html.escape(username, quote=True),
             "{{admin_link}}": admin_link_html,
+            "{{ci_badge}}": ci_badge,
+            "{{ssrf_badge}}": ssrf_badge,
+            "{{xxe_badge}}": xxe_badge,
         },
     )
 
@@ -1574,3 +1593,410 @@ async def revoke_user_sessions(request: Request, user_id: int = Form(None)):
         conn.close()
 
     return RedirectResponse(url="/admin", status_code=303)
+
+
+# =========================================================================
+# ADVANCED VULNERABILITY LABS ROUTES (Command Injection, SSRF, XXE)
+# =========================================================================
+
+def get_lab_status(user_id: int, lab_name: str) -> str:
+    """Get the current progress status of a specific lab for a user."""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT status FROM lab_progress WHERE user_id = ? AND lab_name = ?", [user_id, lab_name]).fetchone()
+        return row["status"] if row else "unsolved"
+    finally:
+        conn.close()
+
+
+def update_lab_status(user_id: int, lab_name: str, status: str):
+    """Update or insert the progress status of a lab for a user."""
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO lab_progress (user_id, lab_name, status) 
+               VALUES (?, ?, ?) 
+               ON CONFLICT(user_id, lab_name) DO UPDATE SET status = ?""",
+            [user_id, lab_name, status, status]
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@router.get("/labs/command-injection")
+async def lab_command_injection_page(request: Request):
+    """Render the Command Injection Lab page."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+        is_admin = user_row and user_row["role"] == "admin"
+    finally:
+        conn.close()
+
+    admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
+    status = get_lab_status(user_id, "command_injection")
+
+    page = _render_page(
+        "labs_command_injection.html",
+        {
+            "{{title}}": "Command Injection Lab - Security Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{username}}": html.escape(username, quote=True),
+            "{{admin_link}}": admin_link_html,
+            "{{status}}": html.escape(status, quote=True),
+            "{{csrf_token}}": html.escape(get_or_create_csrf_token(request), quote=True),
+        }
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/labs/command-injection")
+async def lab_command_injection_post(
+    request: Request,
+    host: str = Form(""),
+    mode: str = Form("vulnerable")
+):
+    """Execute ping command to demonstrate Command Injection."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+    finally:
+        conn.close()
+
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("lab_command_injection", username, ip, f"Mode: {mode} | Host: {host}")
+
+    import sys
+    import subprocess
+
+    output = ""
+    # Define ping parameter based on OS
+    ping_param = "-n" if sys.platform == "win32" else "-c"
+
+    if mode == "vulnerable":
+        # Vulnerable string concatenation running via shell=True
+        cmd = f"ping {ping_param} 1 {host}"
+        try:
+            output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, timeout=5).decode("utf-8", errors="ignore")
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf-8", errors="ignore")
+        except Exception as e:
+            output = str(e)
+
+        # Detect exploitation: metacharacters present in input and command executed
+        if any(char in host for char in ["&", ";", "|", "$", "`"]):
+            update_lab_status(user_id, "command_injection", "exploited")
+
+    else:
+        # Secure implementation: input validation and shell=False list execution
+        # Strict validation: only allow alphanumerics, dots, and hyphens (hostnames and IPs)
+        import re
+        if not re.match(r"^[a-zA-Z0-9.-]+$", host):
+            return JSONResponse({
+                "output": "Execution blocked: Invalid input format. Metacharacters are forbidden.",
+                "status": get_lab_status(user_id, "command_injection")
+            })
+
+        try:
+            output = subprocess.check_output(["ping", ping_param, "1", host], shell=False, stderr=subprocess.STDOUT, timeout=5).decode("utf-8", errors="ignore")
+            # If successfully verified in secure mode after being exploited, mark as solved
+            current_status = get_lab_status(user_id, "command_injection")
+            if current_status == "exploited":
+                update_lab_status(user_id, "command_injection", "solved")
+        except subprocess.CalledProcessError as e:
+            output = e.output.decode("utf-8", errors="ignore")
+        except Exception as e:
+            output = str(e)
+
+    return JSONResponse({
+        "output": html.escape(output, quote=True),
+        "status": get_lab_status(user_id, "command_injection")
+    })
+
+
+@router.get("/labs/ssrf")
+async def lab_ssrf_page(request: Request):
+    """Render the SSRF Lab page."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+        is_admin = user_row and user_row["role"] == "admin"
+    finally:
+        conn.close()
+
+    admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
+    status = get_lab_status(user_id, "ssrf")
+
+    page = _render_page(
+        "labs_ssrf.html",
+        {
+            "{{title}}": "SSRF Lab - Security Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{username}}": html.escape(username, quote=True),
+            "{{admin_link}}": admin_link_html,
+            "{{status}}": html.escape(status, quote=True),
+            "{{csrf_token}}": html.escape(get_or_create_csrf_token(request), quote=True),
+        }
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/labs/ssrf")
+async def lab_ssrf_post(
+    request: Request,
+    url: str = Form(""),
+    mode: str = Form("vulnerable")
+):
+    """Fetch URL preview to demonstrate Server-Side Request Forgery."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+    finally:
+        conn.close()
+
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("lab_ssrf", username, ip, f"Mode: {mode} | URL: {url}")
+
+    from urllib.parse import urlparse
+    import socket
+    import httpx
+
+    content = ""
+
+    if mode == "vulnerable":
+        # Check for SSRF exploitation (accessing localhost admin/welcome)
+        # Check this before requesting so it succeeds even if connection is refused
+        try:
+            parsed = urlparse(url)
+            is_local = parsed.hostname in ["localhost", "127.0.0.1", "0.0.0.0", "::1"] or (parsed.netloc and (parsed.netloc.startswith("localhost") or parsed.netloc.startswith("127.0.0.1")))
+            if is_local and ("/admin" in parsed.path or "/welcome" in parsed.path):
+                update_lab_status(user_id, "ssrf", "exploited")
+        except Exception:
+            pass
+
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(url, follow_redirects=True)
+                content = resp.text[:1500]
+        except Exception as e:
+            content = f"Error fetching URL: {str(e)}"
+    else:
+        # Secure implementation: URL validation + IP blacklist resolution
+        parsed = urlparse(url)
+        if parsed.scheme not in ["http", "https"]:
+            return JSONResponse({
+                "error": "Access blocked: Only HTTP and HTTPS protocols are allowed.",
+                "status": get_lab_status(user_id, "ssrf")
+            }, status_code=400)
+
+        hostname = parsed.hostname
+        if not hostname:
+            return JSONResponse({
+                "error": "Access blocked: Invalid host in URL.",
+                "status": get_lab_status(user_id, "ssrf")
+            }, status_code=400)
+
+        try:
+            resolved_ip = socket.gethostbyname(hostname)
+        except Exception:
+            return JSONResponse({
+                "error": f"Access blocked: Could not resolve hostname '{hostname}'.",
+                "status": get_lab_status(user_id, "ssrf")
+            }, status_code=400)
+
+        # Basic private/loopback check
+        def is_private_or_loopback(ip_str):
+            try:
+                parts = list(map(int, ip_str.split(".")))
+                if len(parts) != 4:
+                    return True
+                # Loopback (127.0.0.0/8)
+                if parts[0] == 127:
+                    return True
+                # Private A (10.0.0.0/8)
+                if parts[0] == 10:
+                    return True
+                # Private B (172.16.0.0/12)
+                if parts[0] == 172 and (16 <= parts[1] <= 31):
+                    return True
+                # Private C (192.168.0.0/16)
+                if parts[0] == 192 and parts[1] == 168:
+                    return True
+                # Link-local (169.254.0.0/16)
+                if parts[0] == 169 and parts[1] == 254:
+                    return True
+                return False
+            except Exception:
+                return True
+
+        if is_private_or_loopback(resolved_ip) or hostname.lower() in ["localhost", "loopback"]:
+            return JSONResponse({
+                "error": "Access blocked: Request to internal/private network addresses is forbidden.",
+                "status": get_lab_status(user_id, "ssrf")
+            }, status_code=400)
+
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(url, follow_redirects=True)
+                content = resp.text[:1500]
+            # Verify and solve the lab
+            current_status = get_lab_status(user_id, "ssrf")
+            if current_status == "exploited":
+                update_lab_status(user_id, "ssrf", "solved")
+        except Exception as e:
+            content = f"Error fetching URL: {str(e)}"
+
+    return JSONResponse({
+        "content": html.escape(content, quote=True),
+        "status": get_lab_status(user_id, "ssrf")
+    })
+
+
+@router.get("/labs/xxe")
+async def lab_xxe_page(request: Request):
+    """Render the XML External Entity (XXE) Lab page."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=302)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username, role FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+        is_admin = user_row and user_row["role"] == "admin"
+    finally:
+        conn.close()
+
+    admin_link_html = '<a href="/admin" class="btn btn-logout">Admin Panel</a>' if is_admin else ''
+    status = get_lab_status(user_id, "xxe")
+
+    page = _render_page(
+        "labs_xxe.html",
+        {
+            "{{title}}": "XXE Lab - Security Lab",
+            "{{body_attrs}}": 'class="dashboard-body"',
+            "{{username}}": html.escape(username, quote=True),
+            "{{admin_link}}": admin_link_html,
+            "{{status}}": html.escape(status, quote=True),
+            "{{csrf_token}}": html.escape(get_or_create_csrf_token(request), quote=True),
+        }
+    )
+    return HTMLResponse(content=page)
+
+
+@router.post("/labs/xxe")
+async def lab_xxe_post(
+    request: Request,
+    xml_data: str = Form(""),
+    mode: str = Form("vulnerable")
+):
+    """Parse XML config upload to demonstrate XXE injection."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+    finally:
+        conn.close()
+
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("lab_xxe", username, ip, f"Mode: {mode}")
+
+    from lxml import etree
+
+    result = ""
+
+    if mode == "vulnerable":
+        try:
+            # Vulnerable parser: resolves external entities and loads DTDs
+            parser = etree.XMLParser(resolve_entities=True, no_network=False, load_dtd=True)
+            root = etree.fromstring(xml_data.encode("utf-8"), parser=parser)
+            
+            name_node = root.find("name")
+            email_node = root.find("email")
+            
+            name_val = name_node.text if name_node is not None else ""
+            email_val = email_node.text if email_node is not None else ""
+            
+            result = f"Profile Updated: Name = {name_val}, Email = {email_val}"
+            
+            # Detect XXE exploitation: input uses SYSTEM and entity was successfully resolved
+            if "SYSTEM" in xml_data and (name_val or email_val):
+                update_lab_status(user_id, "xxe", "exploited")
+        except Exception as e:
+            result = f"XML Parsing Error: {str(e)}"
+    else:
+        try:
+            # Secure parser: resolve_entities=False, load_dtd=False, no_network=True
+            parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, dtd_validation=False)
+            root = etree.fromstring(xml_data.encode("utf-8"), parser=parser)
+            
+            name_node = root.find("name")
+            email_node = root.find("email")
+            
+            name_val = name_node.text if name_node is not None else ""
+            email_val = email_node.text if email_node is not None else ""
+            
+            result = f"Profile Updated: Name = {name_val}, Email = {email_val}"
+            
+            # Verify and solve
+            current_status = get_lab_status(user_id, "xxe")
+            if current_status == "exploited":
+                update_lab_status(user_id, "xxe", "solved")
+        except Exception as e:
+            result = f"XML Parsing Error: {str(e)}"
+
+    return JSONResponse({
+        "result": html.escape(result, quote=True),
+        "status": get_lab_status(user_id, "xxe")
+    })
+
+
+@router.post("/labs/reset")
+async def lab_reset_post(
+    request: Request,
+    lab_name: str = Form("")
+):
+    """Reset the progress status of a specific lab."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT username FROM users WHERE id = ?", [user_id]).fetchone()
+        username = user_row["username"] if user_row else "unknown"
+        
+        conn.execute("DELETE FROM lab_progress WHERE user_id = ? AND lab_name = ?", [user_id, lab_name])
+        conn.commit()
+    finally:
+        conn.close()
+
+    ip = request.client.host if request and request.client else ""
+    audit_logger.log_security_event("lab_reset", username, ip, f"Lab: {lab_name}")
+
+    return JSONResponse({"status": "unsolved"})

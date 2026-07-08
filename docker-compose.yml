@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      # Optional: set secret session keys or captcha site configurations here
+      - SECRET_KEY=default-docker-secret-signing-key-value-12345
+      # - TURNSTILE_SITE_KEY=
+      # - TURNSTILE_SECRET_KEY=
+    volumes:
+      # Mount DB inside container to persist local accounts between compose restarts
+      - ./vulnerable_app.db:/app/vulnerable_app.db
+      - ./security_audit.log:/app/security_audit.log
+    restart: always
