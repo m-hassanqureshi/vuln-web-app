@@ -398,6 +398,17 @@ still resolve). Planned items have no tag yet.
 
 ---
 
+---
+
+## EC2 Deployment
+
+To deploy this application on an AWS EC2 instance (Ubuntu), a script is provided:
+
+1. Clone the repository on your EC2 instance.
+2. Run `./deploy_ec2.sh` to install Docker, Docker Compose, and spin up the container in the background on Port 3001.
+
+---
+
 ## Legal Notice
 
 This application is provided strictly for educational purposes. Unauthorized access to computer systems is illegal. Ensure you have explicit permission before testing security vulnerabilities on any system you do not own. The authors are not responsible for misuse of this project.
